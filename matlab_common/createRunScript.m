@@ -80,7 +80,7 @@ function createRunScript (  local_home_dir, ...
 
   %%% To use intel compilers, need to add executables and libraries to system path
   if (use_intel)
-    fprintf(sfid,'source /opt/intel/bin/compilervars.sh intel64\n');
+    fprintf(sfid,'source /opt/intel/oneapi/setvars.sh\n');
   end
 
   %%% This line executes the C code. For MPI jobs, the scheduler scripts below

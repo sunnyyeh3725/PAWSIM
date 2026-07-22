@@ -11,6 +11,30 @@
  */
 #include "config.h"
 
+/** Copy an input string into a fixed-size PAWSIM config buffer. */
+static void copy_config_string (char * dst, const char * src)
+{
+  size_t len;
+
+  if (dst == NULL)
+  {
+    return;
+  }
+  if (src == NULL)
+  {
+    dst[0] = '\0';
+    return;
+  }
+
+  len = strlen(src);
+  if (len >= MAX_PARAMETER_FILENAME_LENGTH)
+  {
+    len = MAX_PARAMETER_FILENAME_LENGTH - 1;
+  }
+  memcpy(dst,src,len);
+  dst[len] = '\0';
+}
+
 /*
  * Initialize all PAWSIM configuration fields before reading an AWSIM-style
  * key/value input file. Defaults follow AWSIM where there is an exact analogue.
@@ -30,7 +54,7 @@ void pawsim_config_defaults (pawsim_config * cfg)
   cfg->startIdx = 0;
   /** Match AWSIM defaults where possible, then let input files override them. */
   cfg->timeSteppingScheme = TIMESTEPPING_AB3;
-  cfg->momentumScheme = MOMENTUM_AL81;
+  cfg->momentumScheme = MOMENTUM_TW81;
   cfg->thicknessScheme = THICKNESS_AL81;
   cfg->tracerScheme = TRACER_AL81;
   cfg->Lx = 0;
@@ -222,35 +246,35 @@ bool pawsim_config_read (const char * fname, pawsim_config * cfg, FILE * errstrm
     else if (strcmp(key,"useTracer") == 0) cfg->useTracer = (atoi(value) != 0);
     else if (strcmp(key,"useBuoyancy") == 0) cfg->useBuoyancy = (atoi(value) != 0);
     else if (strcmp(key,"useRandomForcing") == 0) cfg->useRandomForcing = (atoi(value) != 0);
-    else if (strcmp(key,"hInitFile") == 0) strncpy(cfg->hInitFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"uInitFile") == 0) strncpy(cfg->uInitFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"vInitFile") == 0) strncpy(cfg->vInitFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"bInitFile") == 0) strncpy(cfg->bInitFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"hbFile") == 0) strncpy(cfg->hbFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"hsFile") == 0) strncpy(cfg->hsFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"OmegazFile") == 0) strncpy(cfg->OmegazFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"gFile") == 0) strncpy(cfg->gFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"tauxFile") == 0) strncpy(cfg->tauxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"tauyFile") == 0) strncpy(cfg->tauyFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"uLidFile") == 0) strncpy(cfg->uLidFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"vLidFile") == 0) strncpy(cfg->vLidFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"FbaroXFile") == 0) strncpy(cfg->FbaroXFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"FbaroYFile") == 0) strncpy(cfg->FbaroYFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"uRelaxFile") == 0) strncpy(cfg->uRelaxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"vRelaxFile") == 0) strncpy(cfg->vRelaxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"hRelaxFile") == 0) strncpy(cfg->hRelaxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"eRelaxFile") == 0) strncpy(cfg->eRelaxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"bRelaxFile") == 0) strncpy(cfg->bRelaxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"uTimeFile") == 0) strncpy(cfg->uTimeFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"vTimeFile") == 0) strncpy(cfg->vTimeFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"hTimeFile") == 0) strncpy(cfg->hTimeFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"eTimeFile") == 0) strncpy(cfg->eTimeFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"bTimeFile") == 0) strncpy(cfg->bTimeFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"wDiaFile") == 0) strncpy(cfg->wDiaFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"diaDiffFile") == 0) strncpy(cfg->diaDiffFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"diaViscUFile") == 0) strncpy(cfg->diaViscUFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"diaViscVFile") == 0) strncpy(cfg->diaViscVFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
-    else if (strcmp(key,"bFluxFile") == 0) strncpy(cfg->bFluxFile,value,MAX_PARAMETER_FILENAME_LENGTH-1);
+    else if (strcmp(key,"hInitFile") == 0) copy_config_string(cfg->hInitFile,value);
+    else if (strcmp(key,"uInitFile") == 0) copy_config_string(cfg->uInitFile,value);
+    else if (strcmp(key,"vInitFile") == 0) copy_config_string(cfg->vInitFile,value);
+    else if (strcmp(key,"bInitFile") == 0) copy_config_string(cfg->bInitFile,value);
+    else if (strcmp(key,"hbFile") == 0) copy_config_string(cfg->hbFile,value);
+    else if (strcmp(key,"hsFile") == 0) copy_config_string(cfg->hsFile,value);
+    else if (strcmp(key,"OmegazFile") == 0) copy_config_string(cfg->OmegazFile,value);
+    else if (strcmp(key,"gFile") == 0) copy_config_string(cfg->gFile,value);
+    else if (strcmp(key,"tauxFile") == 0) copy_config_string(cfg->tauxFile,value);
+    else if (strcmp(key,"tauyFile") == 0) copy_config_string(cfg->tauyFile,value);
+    else if (strcmp(key,"uLidFile") == 0) copy_config_string(cfg->uLidFile,value);
+    else if (strcmp(key,"vLidFile") == 0) copy_config_string(cfg->vLidFile,value);
+    else if (strcmp(key,"FbaroXFile") == 0) copy_config_string(cfg->FbaroXFile,value);
+    else if (strcmp(key,"FbaroYFile") == 0) copy_config_string(cfg->FbaroYFile,value);
+    else if (strcmp(key,"uRelaxFile") == 0) copy_config_string(cfg->uRelaxFile,value);
+    else if (strcmp(key,"vRelaxFile") == 0) copy_config_string(cfg->vRelaxFile,value);
+    else if (strcmp(key,"hRelaxFile") == 0) copy_config_string(cfg->hRelaxFile,value);
+    else if (strcmp(key,"eRelaxFile") == 0) copy_config_string(cfg->eRelaxFile,value);
+    else if (strcmp(key,"bRelaxFile") == 0) copy_config_string(cfg->bRelaxFile,value);
+    else if (strcmp(key,"uTimeFile") == 0) copy_config_string(cfg->uTimeFile,value);
+    else if (strcmp(key,"vTimeFile") == 0) copy_config_string(cfg->vTimeFile,value);
+    else if (strcmp(key,"hTimeFile") == 0) copy_config_string(cfg->hTimeFile,value);
+    else if (strcmp(key,"eTimeFile") == 0) copy_config_string(cfg->eTimeFile,value);
+    else if (strcmp(key,"bTimeFile") == 0) copy_config_string(cfg->bTimeFile,value);
+    else if (strcmp(key,"wDiaFile") == 0) copy_config_string(cfg->wDiaFile,value);
+    else if (strcmp(key,"diaDiffFile") == 0) copy_config_string(cfg->diaDiffFile,value);
+    else if (strcmp(key,"diaViscUFile") == 0) copy_config_string(cfg->diaViscUFile,value);
+    else if (strcmp(key,"diaViscVFile") == 0) copy_config_string(cfg->diaViscVFile,value);
+    else if (strcmp(key,"bFluxFile") == 0) copy_config_string(cfg->bFluxFile,value);
   }
 
   fclose(infile);

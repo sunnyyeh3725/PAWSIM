@@ -293,7 +293,7 @@ bool init_MG ( uint    Nx,
       return false;
     }
 
-    if (m < Ngrids-1)
+    if ((uint) m < Ngrids-1)
     {
       if ( !alloc_MG_matrix(&mg_grids[m].pi,mg_grids[m].Nx,mg_grids[m].Ny)
         || !alloc_MG_matrix(&mg_grids[m].pi_rhs,mg_grids[m].Nx,mg_grids[m].Ny) )
@@ -308,7 +308,7 @@ bool init_MG ( uint    Nx,
     }
 
     // Restrict water column thickness onto all coarser grids.
-    if (m == Ngrids-1)
+    if ((uint) m == Ngrids-1)
     {
       memcpy(*(mg_grids[m].Hc),*Hc,Nx*Ny*sizeof(real));
     }
@@ -1172,7 +1172,7 @@ static real max_residual ( uint      Nx,
 static uint iterate_MG (data_MG * mg_grids, uint n)
 {
   // To record iterations
-  int iters = 0;
+  uint iters = 0;
   
   // To calculate convergence
   real maxres = pi_tol+1;
@@ -1304,7 +1304,7 @@ static uint full_MG (data_MG * mg_grids)
 uint solve_MG (real ** pi, real ** pi_rhs)
 {
   // To record iterations
-  int iters = 0;
+  uint iters = 0;
   
   // For timing
   clock_t start;

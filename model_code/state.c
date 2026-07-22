@@ -23,6 +23,46 @@ static uint block_size_local (uint N, uint coord, uint dim)
   return block_start_local(N,coord+1,dim) - block_start_local(N,coord,dim);
 }
 
+/** Copy a bounded string segment and always write a trailing NUL. */
+static void copy_path_segment (char * dst, const char * src, size_t * pos)
+{
+  size_t len,avail;
+
+  if ((dst == NULL) || (src == NULL) || (pos == NULL))
+  {
+    return;
+  }
+  if (*pos >= MAX_PARAMETER_FILENAME_LENGTH)
+  {
+    dst[MAX_PARAMETER_FILENAME_LENGTH-1] = '\0';
+    return;
+  }
+
+  len = strlen(src);
+  avail = MAX_PARAMETER_FILENAME_LENGTH - 1 - *pos;
+  if (len > avail)
+  {
+    len = avail;
+  }
+  memcpy(dst+*pos,src,len);
+  *pos += len;
+  dst[*pos] = '\0';
+}
+
+/** Join an input directory and relative filename inside PAWSIM's path buffer. */
+static void join_input_path (char * path, const char * dir, const char * name)
+{
+  size_t pos = 0;
+
+  path[0] = '\0';
+  copy_path_segment(path,dir,&pos);
+  if ((pos > 0) && (path[pos-1] != '/'))
+  {
+    copy_path_segment(path,"/",&pos);
+  }
+  copy_path_segment(path,name,&pos);
+}
+
 /** Resolve an AWSIM file parameter relative to the input-file directory. */
 static void resolve_input_path (const pawsim_config * cfg, const char * name, char * path)
 {
@@ -35,13 +75,15 @@ static void resolve_input_path (const pawsim_config * cfg, const char * name, ch
 
   if (name[0] == '/')
   {
-    strncpy(path,name,MAX_PARAMETER_FILENAME_LENGTH-1);
+    size_t pos = 0;
+
+    path[0] = '\0';
+    copy_path_segment(path,name,&pos);
   }
   else
   {
-    snprintf(path,MAX_PARAMETER_FILENAME_LENGTH,"%s/%s",cfg->inputDir,name);
+    join_input_path(path,cfg->inputDir,name);
   }
-  path[MAX_PARAMETER_FILENAME_LENGTH-1] = '\0';
 }
 
 /** Fill owned cells with a scalar default before optional inputs are read. */

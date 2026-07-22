@@ -36,6 +36,33 @@ MPI installation:
 PAWSIM_MPICC=/opt/intel/oneapi/mpi/latest/bin/mpiicx sh Make.sh
 ```
 
+Intel MPI wrappers are small shell scripts that invoke a backend compiler. If
+the wrapper exists but reports an error such as `mpiicx: command not found`,
+the compiler itself is not on `PATH` in the build shell. Either source the
+cluster's oneAPI setup first:
+
+```sh
+source /opt/intel/oneapi/setvars.sh
+sh Make.sh
+```
+
+or pass the compiler bin directory directly to the PAWSIM build:
+
+```sh
+PAWSIM_MPICC=/opt/intel/oneapi/mpi/latest/bin/mpiicx \
+PAWSIM_COMPILER_BIN=/opt/intel/oneapi/compiler/2025.2/bin \
+sh Make.sh
+```
+
+If the cluster exposes `mpiicc` but not `mpiicx` cleanly, you can also tell the
+wrapper which backend compiler to use:
+
+```sh
+PAWSIM_MPICC=/opt/intel/oneapi/mpi/latest/bin/mpiicc \
+PAWSIM_MPI_BACKEND_CC=/opt/intel/oneapi/compiler/2025.2/bin/icx \
+sh Make.sh
+```
+
 If the local setup exposes the underlying C compiler directly, such as
 `/opt/intel/oneapi/compiler/2025.2/bin/icx`, force MPI mode and provide the MPI
 include/link flags explicitly:
@@ -101,12 +128,16 @@ residual norms and the remaining barotropic divergence after the pressure
 correction.
 
 The distributed multigrid path uses distributed smoothing and restriction on
-clean 2:1 levels, then switches to a gathered coarse tail when the next
-coarsening step would be awkward for the MPI decomposition. This keeps
-power-of-two grids mostly distributed while still allowing cases such as
-250 x 250 to use `pressureSolver 2` without reverting the whole pressure solve
-to gathered multigrid. Timing output marks true whole-solver fallbacks with
-`fallback=1`, and the summary reports `fallback_solves`.
+clean 2:1 levels. On coarse levels where each rank would otherwise own only a
+few cells, PAWSIM agglomerates ranks by creating a smaller Cartesian
+communicator for that level. Transitions that are no longer locally nested use
+a gathered restriction/prolongation transfer, but smoothing and residual
+evaluation on the agglomerated coarse level remain distributed across the
+active ranks. This keeps power-of-two grids mostly distributed while still
+allowing cases such as 250 x 250 to use `pressureSolver 2` without reverting
+the whole pressure solve to gathered multigrid. Timing output marks true
+whole-solver fallbacks with `fallback=1`, and the summary reports
+`fallback_solves`.
 
 ## AWSIM Compatibility
 
@@ -167,6 +198,16 @@ tests and avoids whole-solver fallback, but the 250 x 250 25-day gyre timing
 shows that the coarse tail is a real scaling bottleneck. A future optimization
 would distribute the ragged coarse transition instead of gathering it.
 
+For best multigrid performance, choose grid sizes with a large power-of-two
+factor in each horizontal direction. Exact powers of two are ideal, but sizes
+such as `192 = 3*64`, `320 = 5*64`, or `384 = 3*128` remain friendly because
+they halve many times before reaching an odd level. Sizes such as `200`, `250`,
+or `500` are more awkward because they reach odd coarse levels much earlier.
+For example, a user considering a `200 x 200` run should consider `192 x 192`
+if the small resolution change is scientifically acceptable: the pressure
+hierarchy goes `192 -> 96 -> 48 -> 24 -> 12 -> 6`, rather than
+`200 -> 100 -> 50 -> 25`.
+
 ## Regression Tests
 
 The main PAWSIM MPI smoke/regression is:
@@ -183,6 +224,17 @@ uses the gathered coarse-tail path without whole-solver fallback:
 ```sh
 ./test_pawsim_pressure_boundaries.sh
 ```
+
+The grid-size recommendation smoke test compares matched `192 x 192` and
+`200 x 200` gyre setups with pressure timing enabled:
+
+```sh
+./test_pressure_grid_size_recommendations.sh 4 20
+```
+
+The timing ratio is machine-dependent, so this is not a strict performance
+regression. It prints the coarsening paths and the measured mean pressure
+solve times for the requested rank count and number of short time steps.
 
 The broader 25-day comparison sweep used during development is:
 

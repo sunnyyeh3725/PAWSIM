@@ -72,7 +72,7 @@ bool readVector (char * fname, real * vec, uint len, FILE * errstrm)
 {
     // Attempt to open the topography file
     FILE * pfile = NULL;
-    int i = 0;    
+    uint i = 0;    
     bool readok = true;
     
     // Basic error checking
@@ -114,7 +114,7 @@ bool readVector (char * fname, real * vec, uint len, FILE * errstrm)
         {
             if (errstrm != NULL)
             {
-                fprintf(errstrm,"ERROR: Could only read %d of %u values from %s\r\n",i,len,fname);
+                fprintf(errstrm,"ERROR: Could only read %u of %u values from %s\r\n",i,len,fname);
             }
             readok = false;
             break;
@@ -141,8 +141,8 @@ bool readMatrix (char * fname, real ** mat, uint m, uint n, FILE * errstrm)
 {
     // Attempt to open the topography file
     FILE * pfile = NULL;
-    int i = 0; 
-    int j = 0;   
+    uint i = 0; 
+    uint j = 0;   
     bool readok = true;
     
     // Basic error checking
@@ -197,7 +197,7 @@ bool readMatrix (char * fname, real ** mat, uint m, uint n, FILE * errstrm)
             {
                 if (errstrm != NULL)
                 {
-                    fprintf(errstrm,"ERROR: Could only read %d of %u values from %s\r\n",j*m+i,m*n,fname);
+                    fprintf(errstrm,"ERROR: Could only read %u of %u values from %s\r\n",j*m+i,m*n,fname);
                 }
                 readok = false;
                 break;
@@ -229,9 +229,9 @@ bool readMatrix (char * fname, real ** mat, uint m, uint n, FILE * errstrm)
 bool readMatrix3 (char * fname, real *** mat3, uint Nr, uint Nc, uint Ns, FILE * errstrm)
 {
   FILE * pfile = NULL;
-  int i = 0;
-  int j = 0;
-  int k = 0;
+  uint i = 0;
+  uint j = 0;
+  uint k = 0;
   bool readok = true;
   
   // Basic error checking
@@ -299,7 +299,7 @@ bool readMatrix3 (char * fname, real *** mat3, uint Nr, uint Nc, uint Ns, FILE *
         {
           if (errstrm != NULL)
           {
-            fprintf(errstrm,"ERROR: Could only read %d of %u values from %s\r\n",k*Nr*Nc+j*Nr+i,Nr*Nc*Ns,fname);
+            fprintf(errstrm,"ERROR: Could only read %u of %u values from %s\r\n",k*Nr*Nc+j*Nr+i,Nr*Nc*Ns,fname);
           }
           readok = false;
           break;
@@ -327,10 +327,10 @@ bool readMatrix3 (char * fname, real *** mat3, uint Nr, uint Nc, uint Ns, FILE *
 bool readMatrix4 (char * fname, real **** mat4, uint Nr, uint Nc, uint Ns, uint Nt, FILE * errstrm)
 {
   FILE * pfile = NULL;
-  int i = 0;
-  int j = 0;
-  int k = 0;
-  int l = 0;
+  uint i = 0;
+  uint j = 0;
+  uint k = 0;
+  uint l = 0;
   bool readok = true;
   
   // Basic error checking
@@ -410,7 +410,7 @@ bool readMatrix4 (char * fname, real **** mat4, uint Nr, uint Nc, uint Ns, uint 
           {
             if (errstrm != NULL)
             {
-              fprintf(errstrm,"ERROR: Could only read %d of %u values from %s\r\n",l*Nr*Nc*Ns+k*Nr*Nc+j*Nr+i,Nr*Nc*Ns*Nt,fname);
+              fprintf(errstrm,"ERROR: Could only read %u of %u values from %s\r\n",l*Nr*Nc*Ns+k*Nr*Nc+j*Nr+i,Nr*Nc*Ns*Nt,fname);
             }
             readok = false;
             break;
@@ -614,7 +614,7 @@ void vecfree (real * vec)
  */
 void vec2mat (real * vec, real *** pmat, uint m, uint n)
 {
-    int i;
+    uint i;
 
     if (*pmat == NULL)
     {
@@ -639,7 +639,7 @@ void vec2mat (real * vec, real *** pmat, uint m, uint n)
  */
 void vec2mat3 (real * vec, real **** pmat3, uint Nr, uint Nc, uint Ns)
 {
-  int i,j;
+  uint i,j;
   real *** rows = NULL;
   real ** cols = NULL;
   real * slices = NULL;
@@ -714,7 +714,7 @@ bool readParams (char * infname, paramdata * params, uint nparams, FILE * errstr
     FILE * infile = NULL;
     bool readok = true;
     char inbuf[256];
-    int i = 0;
+    uint i = 0;
     
     // Basic error checking
     if (infname == NULL)
@@ -812,7 +812,8 @@ bool readParams (char * infname, paramdata * params, uint nparams, FILE * errstr
 void thomas (const real * a, const real * b, real * c, real * d, real * x, unsigned int n)
 {
   real id;
-  int i;
+  uint i;
+  int ib;
   
   // Modify the coefficients
   c[0] /= b[0];	// Division by zero risk
@@ -826,9 +827,9 @@ void thomas (const real * a, const real * b, real * c, real * d, real * x, unsig
   
   // Now back substitute
   x[n - 1] = d[n - 1];
-  for (i = n-2; i >= 0; i --)
+  for (ib = (int) n-2; ib >= 0; ib --)
   {
-    x[i] = d[i] - c[i] * x[i + 1];
+    x[ib] = d[ib] - c[ib] * x[ib + 1];
   }
 }
 
@@ -998,8 +999,6 @@ real min3 (real v1, real v2, real v3)
  */
 real minmod (real v1, real v2, real v3)
 {
-  real test = v1*v2*v3;
-  
   if (v1 < 0 && v2 < 0 && v3 < 0)
   {
     return max3(v1,v2,v3);

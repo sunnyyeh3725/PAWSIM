@@ -453,6 +453,68 @@ static void restrict_global_power2 (uint Nx_f, uint Ny_f, real ** fine,
   }
 }
 
+/** Rank-0 restriction for west-face coefficients on an even global grid. */
+static void restrict_global_west_faces_power2 (uint Nx_f, uint Ny_f, real ** fine,
+                                               real ** coarse)
+{
+  uint i,j;
+
+  for (i = 0; i < Nx_f/2; i ++)
+  {
+    for (j = 0; j < Ny_f/2; j ++)
+    {
+      coarse[i][j] = 0.5*(fine[2*i][2*j] + fine[2*i][2*j+1]);
+    }
+  }
+}
+
+/** Rank-0 restriction for south-face coefficients on an even global grid. */
+static void restrict_global_south_faces_power2 (uint Nx_f, uint Ny_f, real ** fine,
+                                                real ** coarse)
+{
+  uint i,j;
+
+  for (i = 0; i < Nx_f/2; i ++)
+  {
+    for (j = 0; j < Ny_f/2; j ++)
+    {
+      coarse[i][j] = 0.5*(fine[2*i][2*j] + fine[2*i+1][2*j]);
+    }
+  }
+}
+
+/** Pack a rank-0 matrix into a contiguous buffer for communicator broadcasts. */
+static void pack_global_matrix (real * buf, real ** global, uint Nx, uint Ny)
+{
+  uint i,j;
+
+  for (i = 0; i < Nx; i ++)
+  {
+    for (j = 0; j < Ny; j ++)
+    {
+      buf[i*Ny+j] = global[i][j];
+    }
+  }
+}
+
+/** Build column pointers onto a flat global matrix buffer. */
+static bool make_matrix_columns (real *** cols_out, real * buf, uint Nx, uint Ny)
+{
+  uint i;
+  real ** cols = malloc(Nx*sizeof(real *));
+
+  if (cols == NULL)
+  {
+    return false;
+  }
+  for (i = 0; i < Nx; i ++)
+  {
+    cols[i] = buf + i*Ny;
+  }
+  *cols_out = cols;
+  return true;
+}
+
 /*
  * Enforce the rigid-lid column thickness constraint before the pressure solve.
  *
@@ -856,10 +918,14 @@ static uint solve_pressure_mg_gathered (pawsim_context * ctx)
 #define PAWSIM_DMG_POST_SMOOTH 3
 #define PAWSIM_DMG_COARSE_SMOOTH 80
 #define PAWSIM_DMG_MIN_GLOBAL 8
+#define PAWSIM_DMG_MIN_LOCAL 8
 
 typedef struct pawsim_dmg_level
 {
   pawsim_domain dom;
+  bool active;
+  bool owns_comm;
+  bool transfer_gathered_from_fine;
   /** x is the pressure correction on this level; rhs is the residual equation. */
   pawsim_field2d x;
   pawsim_field2d rhs;
@@ -896,6 +962,14 @@ static void dmg_level_free (pawsim_dmg_level * lev)
   pawsim_field2d_free(&lev->Hc);
   pawsim_field2d_free(&lev->Hw);
   pawsim_field2d_free(&lev->Hs);
+#ifdef PAWSIM_USE_MPI
+  if (lev->owns_comm)
+  {
+    MPI_Comm_free(&lev->dom.comm);
+  }
+#endif
+  lev->active = false;
+  lev->owns_comm = false;
 }
 
 /** Free all allocated distributed multigrid levels. */
@@ -915,36 +989,146 @@ static void dmg_hierarchy_free (pawsim_dmg_hierarchy * mg)
   mg->nlevels = 0;
 }
 
-/** Create the domain metadata for a coarser multigrid level on the same ranks. */
-static void dmg_init_level_domain (pawsim_domain * levdom, const pawsim_domain * basedom,
-                                   uint Nx, uint Ny)
+/** Pick a coarser rank grid that avoids very small local coarse tiles. */
+static void dmg_choose_coarse_dims (uint Nx, uint Ny, const int prev_dims[2],
+                                    int dims[2])
 {
+  dims[0] = prev_dims[0];
+  dims[1] = prev_dims[1];
+
+  /*
+   * Shrink dimensions independently. Power-of-two process grids therefore
+   * agglomerate smoothly, while odd process counts fall back to fewer ranks
+   * once a dimension can no longer be split profitably.
+   */
+  while ((dims[0] > 1) && (((Nx / (uint) dims[0]) < PAWSIM_DMG_MIN_LOCAL)
+        || ((uint) dims[0] > Nx)))
+  {
+    dims[0] = (dims[0] % 2 == 0) ? dims[0]/2 : 1;
+  }
+  while ((dims[1] > 1) && (((Ny / (uint) dims[1]) < PAWSIM_DMG_MIN_LOCAL)
+        || ((uint) dims[1] > Ny)))
+  {
+    dims[1] = (dims[1] % 2 == 0) ? dims[1]/2 : 1;
+  }
+}
+
+/*
+ * Create the domain metadata for one multigrid level.
+ *
+ * Level 0 reuses the model communicator. Coarser levels may use a smaller
+ * Cartesian communicator made from the lowest-numbered ranks in MPI_COMM_WORLD;
+ * ranks outside that active set keep active=false and skip stencil work until
+ * the V-cycle returns to a level they own.
+ */
+static bool dmg_init_level_domain (pawsim_dmg_level * lev,
+                                   const pawsim_domain * basedom,
+                                   uint Nx, uint Ny, const int dims[2],
+                                   bool reuse_base_comm)
+{
+  pawsim_domain * levdom = &lev->dom;
+
   memset(levdom,0,sizeof(*levdom));
-  levdom->comm = basedom->comm;
-  levdom->rank = basedom->rank;
-  levdom->size = basedom->size;
-  levdom->dims[0] = basedom->dims[0];
-  levdom->dims[1] = basedom->dims[1];
-  levdom->coords[0] = basedom->coords[0];
-  levdom->coords[1] = basedom->coords[1];
-  levdom->nbr_w = basedom->nbr_w;
-  levdom->nbr_e = basedom->nbr_e;
-  levdom->nbr_s = basedom->nbr_s;
-  levdom->nbr_n = basedom->nbr_n;
   levdom->Nx = Nx;
   levdom->Ny = Ny;
   levdom->nghost = 1;
   levdom->periodic_x = basedom->periodic_x;
   levdom->periodic_y = basedom->periodic_y;
-  /*
-   * Every multigrid level is decomposed over the same Cartesian rank topology.
-   * Distributed restriction/prolongation is only used when adjacent levels are
-   * cleanly nested rank by rank.
-   */
+
+  lev->active = true;
+  lev->owns_comm = false;
+
+  if (reuse_base_comm)
+  {
+    levdom->comm = basedom->comm;
+    levdom->rank = basedom->rank;
+    levdom->size = basedom->size;
+    levdom->dims[0] = basedom->dims[0];
+    levdom->dims[1] = basedom->dims[1];
+    levdom->coords[0] = basedom->coords[0];
+    levdom->coords[1] = basedom->coords[1];
+    levdom->nbr_w = basedom->nbr_w;
+    levdom->nbr_e = basedom->nbr_e;
+    levdom->nbr_s = basedom->nbr_s;
+    levdom->nbr_n = basedom->nbr_n;
+  }
+  else
+  {
+#ifdef PAWSIM_USE_MPI
+    int world_rank,world_size,active_size;
+    int periods[2];
+    MPI_Comm active_comm;
+
+    MPI_Comm_rank(MPI_COMM_WORLD,&world_rank);
+    MPI_Comm_size(MPI_COMM_WORLD,&world_size);
+    active_size = dims[0]*dims[1];
+    if ((active_size <= 0) || (active_size > world_size))
+    {
+      return false;
+    }
+
+    lev->active = (world_rank < active_size);
+    MPI_Comm_split(MPI_COMM_WORLD,lev->active ? 0 : MPI_UNDEFINED,
+                   world_rank,&active_comm);
+    if (lev->active)
+    {
+      periods[0] = basedom->periodic_x ? 1 : 0;
+      periods[1] = basedom->periodic_y ? 1 : 0;
+      MPI_Cart_create(active_comm,2,(int *) dims,periods,0,&levdom->comm);
+      MPI_Comm_free(&active_comm);
+      lev->owns_comm = true;
+      MPI_Comm_rank(levdom->comm,&levdom->rank);
+      MPI_Comm_size(levdom->comm,&levdom->size);
+      levdom->dims[0] = dims[0];
+      levdom->dims[1] = dims[1];
+      MPI_Cart_coords(levdom->comm,levdom->rank,2,levdom->coords);
+      MPI_Cart_shift(levdom->comm,0,1,&levdom->nbr_w,&levdom->nbr_e);
+      MPI_Cart_shift(levdom->comm,1,1,&levdom->nbr_s,&levdom->nbr_n);
+    }
+    else
+    {
+      levdom->comm = MPI_COMM_NULL;
+      levdom->rank = -1;
+      levdom->size = 0;
+      levdom->dims[0] = dims[0];
+      levdom->dims[1] = dims[1];
+      levdom->coords[0] = 0;
+      levdom->coords[1] = 0;
+      levdom->nbr_w = MPI_PROC_NULL;
+      levdom->nbr_e = MPI_PROC_NULL;
+      levdom->nbr_s = MPI_PROC_NULL;
+      levdom->nbr_n = MPI_PROC_NULL;
+    }
+#else
+    (void) dims;
+    levdom->comm = basedom->comm;
+    levdom->rank = 0;
+    levdom->size = 1;
+    levdom->dims[0] = 1;
+    levdom->dims[1] = 1;
+    levdom->coords[0] = 0;
+    levdom->coords[1] = 0;
+    levdom->nbr_w = basedom->periodic_x ? 0 : MPI_PROC_NULL;
+    levdom->nbr_e = basedom->periodic_x ? 0 : MPI_PROC_NULL;
+    levdom->nbr_s = basedom->periodic_y ? 0 : MPI_PROC_NULL;
+    levdom->nbr_n = basedom->periodic_y ? 0 : MPI_PROC_NULL;
+#endif
+  }
+
+  if (!lev->active)
+  {
+    levdom->i0 = 0;
+    levdom->j0 = 0;
+    levdom->nx = 0;
+    levdom->ny = 0;
+    return true;
+  }
+
   levdom->i0 = block_start_rank(Nx,(uint) levdom->coords[0],(uint) levdom->dims[0]);
   levdom->j0 = block_start_rank(Ny,(uint) levdom->coords[1],(uint) levdom->dims[1]);
   levdom->nx = block_size_rank(Nx,(uint) levdom->coords[0],(uint) levdom->dims[0]);
   levdom->ny = block_size_rank(Ny,(uint) levdom->coords[1],(uint) levdom->dims[1]);
+  return (levdom->nx > 0) && (levdom->ny > 0);
 }
 
 /** Test whether fine/coarse domains are locally nested by an exact 2:1 ratio. */
@@ -965,38 +1149,59 @@ static bool dmg_nested_with_previous_level (const pawsim_dmg_level * fine,
 }
 
 /*
- * Build a distributed multigrid hierarchy. Coarsening proceeds while every
- * rank's local tile remains a clean 2:1 child of the next coarser tile.
+ * Build a distributed multigrid hierarchy. Adjacent clean levels use local
+ * transfer operators; agglomerated or otherwise non-nested transitions are
+ * marked so the V-cycle can use gathered transfer operators there.
  */
 static bool dmg_build_hierarchy (pawsim_dmg_hierarchy * mg, const pawsim_context * ctx)
 {
   uint Nx,Ny;
+  int dims[2];
 
   memset(mg,0,sizeof(*mg));
   /*
-   * Current design: use distributed levels as far as they are clean, then use
-   * a gathered tail. This keeps pressureSolver 2 valid for arbitrary grids,
-   * while still giving the efficient path on power-of-two cases.
+   * Use distributed levels throughout the hierarchy, but allow the active rank
+   * grid to shrink once coarse tiles would become too small. A gathered coarse
+   * tail remains available as the final robust solve on the bottom level.
    */
   mg->has_gathered_tail = true;
 
   Nx = ctx->dom.Nx;
   Ny = ctx->dom.Ny;
+  dims[0] = ctx->dom.dims[0];
+  dims[1] = ctx->dom.dims[1];
   while (mg->nlevels < PAWSIM_DMG_MAX_LEVELS)
   {
     pawsim_dmg_level * lev = &mg->level[mg->nlevels];
-    dmg_init_level_domain(&lev->dom,&ctx->dom,Nx,Ny);
+    bool reuse_base_comm = (mg->nlevels == 0)
+                        && (dims[0] == ctx->dom.dims[0])
+                        && (dims[1] == ctx->dom.dims[1]);
 
-    if ((lev->dom.nx == 0) || (lev->dom.ny == 0)
-     || !pawsim_field2d_alloc(&lev->x,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
-     || !pawsim_field2d_alloc(&lev->rhs,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
-     || !pawsim_field2d_alloc(&lev->res,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
-     || !pawsim_field2d_alloc(&lev->Hc,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
-     || !pawsim_field2d_alloc(&lev->Hw,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
-     || !pawsim_field2d_alloc(&lev->Hs,lev->dom.nx,lev->dom.ny,lev->dom.nghost))
+    lev->transfer_gathered_from_fine = false;
+    if (!dmg_init_level_domain(lev,&ctx->dom,Nx,Ny,dims,reuse_base_comm))
     {
       dmg_hierarchy_free(mg);
       return false;
+    }
+    if (mg->nlevels > 0)
+    {
+      pawsim_dmg_level * fine = &mg->level[mg->nlevels-1];
+      lev->transfer_gathered_from_fine =
+        !dmg_nested_with_previous_level(fine,lev);
+    }
+
+    if (lev->active)
+    {
+      if (!pawsim_field2d_alloc(&lev->x,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
+       || !pawsim_field2d_alloc(&lev->rhs,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
+       || !pawsim_field2d_alloc(&lev->res,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
+       || !pawsim_field2d_alloc(&lev->Hc,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
+       || !pawsim_field2d_alloc(&lev->Hw,lev->dom.nx,lev->dom.ny,lev->dom.nghost)
+       || !pawsim_field2d_alloc(&lev->Hs,lev->dom.nx,lev->dom.ny,lev->dom.nghost))
+      {
+        dmg_hierarchy_free(mg);
+        return false;
+      }
     }
     lev->dx = ctx->cfg.Lx / Nx;
     lev->dy = ctx->cfg.Ly / Ny;
@@ -1008,47 +1213,25 @@ static bool dmg_build_hierarchy (pawsim_dmg_hierarchy * mg, const pawsim_context
       break;
     }
 
-    /*
-     * Stop before a 2:1 transition that would leave an odd global level.
-     * The gathered coarse tail can handle that case in a rank-independent
-     * way, while distributed local restriction would depend on how the odd
-     * level is split across MPI ranks.
-     */
-    if ((Nx % 4 != 0) || (Ny % 4 != 0))
     {
-      break;
-    }
-
-    {
-      pawsim_domain coarse_dom;
       uint Nx_c = coarsen_size(Nx);
       uint Ny_c = coarsen_size(Ny);
+      int coarse_dims[2];
+      uint active_cells_x;
+      uint active_cells_y;
 
-      dmg_init_level_domain(&coarse_dom,&ctx->dom,Nx_c,Ny_c);
-      if ((coarse_dom.nx == 0) || (coarse_dom.ny == 0))
-      {
-        break;
-      }
-
-      if (!((Nx == 2*Nx_c) && (Ny == 2*Ny_c)
-         && (mg->level[mg->nlevels-1].dom.i0 == 2*coarse_dom.i0)
-         && (mg->level[mg->nlevels-1].dom.j0 == 2*coarse_dom.j0)
-         && (mg->level[mg->nlevels-1].dom.nx == 2*coarse_dom.nx)
-         && (mg->level[mg->nlevels-1].dom.ny == 2*coarse_dom.ny)))
+      dmg_choose_coarse_dims(Nx_c,Ny_c,dims,coarse_dims);
+      active_cells_x = Nx_c / (uint) coarse_dims[0];
+      active_cells_y = Ny_c / (uint) coarse_dims[1];
+      if ((active_cells_x == 0) || (active_cells_y == 0))
       {
         break;
       }
 
       Nx = Nx_c;
       Ny = Ny_c;
-    }
-
-    if (mg->nlevels > 1
-     && !dmg_nested_with_previous_level(&mg->level[mg->nlevels-2],
-                                        &mg->level[mg->nlevels-1]))
-    {
-      dmg_hierarchy_free(mg);
-      return false;
+      dims[0] = coarse_dims[0];
+      dims[1] = coarse_dims[1];
     }
   }
 
@@ -1648,13 +1831,190 @@ static real dmg_gathered_coarsened_tail (pawsim_dmg_level * lev, const pawsim_co
 }
 
 /*
- * Recursive distributed multigrid V-cycle. Cleanly nested levels stay
- * distributed; the coarsest awkward level uses the gathered tail.
+ * Restrict across a non-nested or agglomerating level boundary.
+ *
+ * The fine level gathers the residual and operator coefficients to its rank 0.
+ * Rank 0 performs the same 2:1 restriction algebra used by the local path,
+ * then scatters the coarse fields only to ranks that are active on the coarse
+ * communicator.
+ */
+static bool dmg_restrict_gathered_transition (pawsim_dmg_level * fine,
+                                              pawsim_dmg_level * coarse)
+{
+  real ** fine_res = NULL;
+  real ** fine_Hc = NULL;
+  real ** fine_Hw = NULL;
+  real ** fine_Hs = NULL;
+  real ** coarse_rhs = NULL;
+  real ** coarse_Hc = NULL;
+  real ** coarse_Hw = NULL;
+  real ** coarse_Hs = NULL;
+  bool ok = true;
+
+  if ((fine->dom.Nx != 2*coarse->dom.Nx)
+   || (fine->dom.Ny != 2*coarse->dom.Ny))
+  {
+    return false;
+  }
+
+  if (fine->dom.rank == 0)
+  {
+    fine_res = matalloc(fine->dom.Nx,fine->dom.Ny);
+    fine_Hc = matalloc(fine->dom.Nx,fine->dom.Ny);
+    fine_Hw = matalloc(fine->dom.Nx,fine->dom.Ny);
+    fine_Hs = matalloc(fine->dom.Nx,fine->dom.Ny);
+    coarse_rhs = matalloc(coarse->dom.Nx,coarse->dom.Ny);
+    coarse_Hc = matalloc(coarse->dom.Nx,coarse->dom.Ny);
+    coarse_Hw = matalloc(coarse->dom.Nx,coarse->dom.Ny);
+    coarse_Hs = matalloc(coarse->dom.Nx,coarse->dom.Ny);
+    ok = (fine_res != NULL) && (fine_Hc != NULL) && (fine_Hw != NULL)
+      && (fine_Hs != NULL) && (coarse_rhs != NULL) && (coarse_Hc != NULL)
+      && (coarse_Hw != NULL) && (coarse_Hs != NULL);
+  }
+
+#ifdef PAWSIM_USE_MPI
+  {
+    int ok_int = ok ? 1 : 0;
+    MPI_Bcast(&ok_int,1,MPI_INT,0,fine->dom.comm);
+    ok = (ok_int != 0);
+  }
+#endif
+
+  if (ok)
+  {
+    ok = gather_pressure_field(fine_res,&fine->res,&fine->dom,500)
+      && gather_pressure_field(fine_Hc,&fine->Hc,&fine->dom,510)
+      && gather_pressure_field(fine_Hw,&fine->Hw,&fine->dom,520)
+      && gather_pressure_field(fine_Hs,&fine->Hs,&fine->dom,530);
+  }
+
+  if (ok && (fine->dom.rank == 0))
+  {
+    restrict_global_power2(fine->dom.Nx,fine->dom.Ny,fine_res,coarse_rhs);
+    restrict_global_power2(fine->dom.Nx,fine->dom.Ny,fine_Hc,coarse_Hc);
+    restrict_global_west_faces_power2(fine->dom.Nx,fine->dom.Ny,fine_Hw,coarse_Hw);
+    restrict_global_south_faces_power2(fine->dom.Nx,fine->dom.Ny,fine_Hs,coarse_Hs);
+  }
+
+  if (ok && coarse->active)
+  {
+    ok = scatter_pressure_field(&coarse->rhs,coarse_rhs,&coarse->dom,540)
+      && scatter_pressure_field(&coarse->Hc,coarse_Hc,&coarse->dom,550)
+      && scatter_pressure_field(&coarse->Hw,coarse_Hw,&coarse->dom,560)
+      && scatter_pressure_field(&coarse->Hs,coarse_Hs,&coarse->dom,570);
+    pawsim_field2d_zero(&coarse->x);
+    pawsim_field2d_exchange_scalar_halo(&coarse->rhs,&coarse->dom);
+    pawsim_field2d_exchange_scalar_halo(&coarse->Hc,&coarse->dom);
+    pawsim_field2d_exchange_scalar_halo(&coarse->Hw,&coarse->dom);
+    pawsim_field2d_exchange_scalar_halo(&coarse->Hs,&coarse->dom);
+  }
+
+#ifdef PAWSIM_USE_MPI
+  {
+    int ok_int = ok ? 1 : 0;
+    MPI_Bcast(&ok_int,1,MPI_INT,0,fine->dom.comm);
+    ok = (ok_int != 0);
+  }
+#endif
+
+  if (fine_res != NULL) matfree(fine_res);
+  if (fine_Hc != NULL) matfree(fine_Hc);
+  if (fine_Hw != NULL) matfree(fine_Hw);
+  if (fine_Hs != NULL) matfree(fine_Hs);
+  if (coarse_rhs != NULL) matfree(coarse_rhs);
+  if (coarse_Hc != NULL) matfree(coarse_Hc);
+  if (coarse_Hw != NULL) matfree(coarse_Hw);
+  if (coarse_Hs != NULL) matfree(coarse_Hs);
+
+  return ok;
+}
+
+/*
+ * Prolong across an agglomerating level boundary.
+ *
+ * Only active coarse ranks gather the solved correction. The resulting global
+ * coarse buffer is broadcast on the fine communicator, allowing every active
+ * fine rank to interpolate its own correction without joining the coarse
+ * communicator.
+ */
+static real dmg_prolong_gathered_transition (pawsim_dmg_level * fine,
+                                             pawsim_dmg_level * coarse,
+                                             const pawsim_config * cfg)
+{
+  real ** global_x = NULL;
+  real ** coarse_cols = NULL;
+  real * coarse_buf = NULL;
+  real max_update = 0;
+  bool ok = true;
+
+  coarse_buf = malloc((size_t) coarse->dom.Nx*coarse->dom.Ny*sizeof(real));
+  if (coarse_buf == NULL)
+  {
+    ok = false;
+  }
+
+  if (coarse->active && (coarse->dom.rank == 0))
+  {
+    global_x = matalloc(coarse->dom.Nx,coarse->dom.Ny);
+    ok = ok && (global_x != NULL);
+  }
+
+#ifdef PAWSIM_USE_MPI
+  {
+    int ok_int = ok ? 1 : 0;
+    MPI_Bcast(&ok_int,1,MPI_INT,0,fine->dom.comm);
+    ok = (ok_int != 0);
+  }
+#endif
+
+  if (ok && coarse->active)
+  {
+    ok = gather_pressure_field(global_x,&coarse->x,&coarse->dom,580);
+  }
+
+  if (ok && (fine->dom.rank == 0))
+  {
+    pack_global_matrix(coarse_buf,global_x,coarse->dom.Nx,coarse->dom.Ny);
+  }
+
+#ifdef PAWSIM_USE_MPI
+  if (ok)
+  {
+    MPI_Bcast(coarse_buf,(int) (coarse->dom.Nx*coarse->dom.Ny),
+              MPI_DOUBLE,0,fine->dom.comm);
+  }
+#endif
+
+  if (ok && make_matrix_columns(&coarse_cols,coarse_buf,coarse->dom.Nx,coarse->dom.Ny))
+  {
+    max_update = dmg_prolong_add_global_coarse(fine,coarse_cols,
+                                               coarse->dom.Nx,coarse->dom.Ny,cfg);
+  }
+  else
+  {
+    max_update = cfg->pi_tol + 1;
+  }
+
+  if (global_x != NULL) matfree(global_x);
+  free(coarse_cols);
+  free(coarse_buf);
+  return max_update;
+}
+
+/*
+ * Recursive distributed multigrid V-cycle. Cleanly nested levels use fully
+ * local transfers; agglomerating or non-nested level pairs use gathered
+ * transfers across that one boundary.
  */
 static real dmg_vcycle (pawsim_dmg_hierarchy * mg, uint l, const pawsim_config * cfg)
 {
   pawsim_dmg_level * lev = &mg->level[l];
   real max_update;
+
+  if (!lev->active)
+  {
+    return 0;
+  }
 
   if (l == mg->nlevels-1)
   {
@@ -1676,13 +2036,31 @@ static real dmg_vcycle (pawsim_dmg_hierarchy * mg, uint l, const pawsim_config *
 
   max_update = dmg_jacobi_smooth(lev,cfg,PAWSIM_DMG_PRE_SMOOTH);
   dmg_residual(lev,cfg);
-  dmg_restrict_field(&mg->level[l+1].rhs,&mg->level[l+1].dom,&lev->res,&lev->dom);
-  dmg_restrict_field(&mg->level[l+1].Hc,&mg->level[l+1].dom,&lev->Hc,&lev->dom);
-  dmg_restrict_west_faces(&mg->level[l+1].Hw,&mg->level[l+1].dom,&lev->Hw);
-  dmg_restrict_south_faces(&mg->level[l+1].Hs,&mg->level[l+1].dom,&lev->Hs);
-  pawsim_field2d_zero(&mg->level[l+1].x);
+  if (mg->level[l+1].transfer_gathered_from_fine)
+  {
+    if (!dmg_restrict_gathered_transition(lev,&mg->level[l+1]))
+    {
+      return cfg->pi_tol + 1;
+    }
+  }
+  else
+  {
+    dmg_restrict_field(&mg->level[l+1].rhs,&mg->level[l+1].dom,&lev->res,&lev->dom);
+    dmg_restrict_field(&mg->level[l+1].Hc,&mg->level[l+1].dom,&lev->Hc,&lev->dom);
+    dmg_restrict_west_faces(&mg->level[l+1].Hw,&mg->level[l+1].dom,&lev->Hw);
+    dmg_restrict_south_faces(&mg->level[l+1].Hs,&mg->level[l+1].dom,&lev->Hs);
+    pawsim_field2d_zero(&mg->level[l+1].x);
+  }
   max_update = fmax(max_update,dmg_vcycle(mg,l+1,cfg));
-  max_update = fmax(max_update,dmg_prolong_add(&lev->x,&lev->dom,&mg->level[l+1].x,&mg->level[l+1].dom));
+  if (mg->level[l+1].transfer_gathered_from_fine)
+  {
+    max_update = fmax(max_update,dmg_prolong_gathered_transition(lev,&mg->level[l+1],cfg));
+  }
+  else
+  {
+    max_update = fmax(max_update,dmg_prolong_add(&lev->x,&lev->dom,
+                                                 &mg->level[l+1].x,&mg->level[l+1].dom));
+  }
   max_update = fmax(max_update,dmg_jacobi_smooth(lev,cfg,PAWSIM_DMG_POST_SMOOTH));
   return max_update;
 }

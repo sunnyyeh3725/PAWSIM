@@ -12,6 +12,52 @@
 #include "diagnostics.h"
 #include "io.h"
 
+/** Append one bounded path segment and always keep the destination valid. */
+static void append_path_segment (char * dst, size_t dst_size,
+                                 const char * src, size_t * pos)
+{
+  size_t len,avail;
+
+  if ((dst == NULL) || (src == NULL) || (pos == NULL) || (dst_size == 0))
+  {
+    return;
+  }
+  if (*pos >= dst_size)
+  {
+    dst[dst_size-1] = '\0';
+    return;
+  }
+
+  len = strlen(src);
+  avail = dst_size - 1 - *pos;
+  if (len > avail)
+  {
+    len = avail;
+  }
+  memcpy(dst+*pos,src,len);
+  *pos += len;
+  dst[*pos] = '\0';
+}
+
+/** Join output directory and filename without triggering truncation warnings. */
+static void build_output_path (char * path, size_t path_size,
+                               const char * outdir, const char * name)
+{
+  size_t pos = 0;
+
+  if ((path == NULL) || (path_size == 0))
+  {
+    return;
+  }
+  path[0] = '\0';
+  append_path_segment(path,path_size,outdir,&pos);
+  if ((pos > 0) && (path[pos-1] != '/'))
+  {
+    append_path_segment(path,path_size,"/",&pos);
+  }
+  append_path_segment(path,path_size,name,&pos);
+}
+
 /** Write one named cell-centered field into the PAWSIM/AWSIM output directory. */
 static bool write_named_field (const char * outdir, const char * name,
                                const pawsim_field2d * field,
@@ -19,7 +65,7 @@ static bool write_named_field (const char * outdir, const char * name,
 {
   char outfile[MAX_PARAMETER_FILENAME_LENGTH];
 
-  snprintf(outfile,sizeof(outfile),"%s/%s",outdir,name);
+  build_output_path(outfile,sizeof(outfile),outdir,name);
   return pawsim_write_global_field2d(outfile,field,dom);
 }
 
@@ -30,7 +76,7 @@ static bool write_named_qfield (const char * outdir, const char * name,
 {
   char outfile[MAX_PARAMETER_FILENAME_LENGTH];
 
-  snprintf(outfile,sizeof(outfile),"%s/%s",outdir,name);
+  build_output_path(outfile,sizeof(outfile),outdir,name);
   return pawsim_write_global_qfield2d(outfile,field,dom);
 }
 
@@ -628,7 +674,7 @@ bool pawsim_diagnostics_write_EZ_if_due (pawsim_context * ctx)
 
     if (ctx->dom.rank == 0)
     {
-      snprintf(outfile,sizeof(outfile),"%s/%s",ctx->outdir,EZFILE);
+      build_output_path(outfile,sizeof(outfile),ctx->outdir,EZFILE);
       file = fopen(outfile,(ctx->cfg.restart || (ctx->n_EZ > 1)) ? "a" : "w");
       if (file == NULL)
       {
