@@ -83,28 +83,58 @@ appended in MPI builds.
 ## Matlab Run Scripts
 
 The existing Matlab setup scripts still generate AWSIM-style input directories.
-`matlab_common/createRunScript.m` remains backward-compatible with the old
-serial AWSIM call, but it also accepts optional MPI arguments:
+`matlab_common/createRunScript.m` has an explicit PAWSIM run-launch interface:
 
 ```matlab
 createRunScript(local_home_dir, run_name, model_code_dir, exec_name, ...
                 use_intel, use_pbs, use_cluster, uname, ...
                 cluster_addr, cluster_home_dir, ...
-                use_mpi, mpi_nproc, mpi_launcher)
+                use_mpi, mpi_nproc, mpi_launcher, ...
+                mpi_nodes, mpi_tasks_per_node)
 ```
 
 For a local PAWSIM run, set `exec_name = 'PAWSIM.exe'`,
-`model_code_dir = fullfile('../../','pawsim')`, `use_mpi = true`, and
-`mpi_nproc` to the desired rank count. With the default launcher, the generated
-`Run.sh` uses:
+`model_code_dir_name` to the PAWSIM source directory name, `use_mpi = true`,
+and `mpi_nproc` to the desired rank count. With the default launcher, the
+generated `Run.sh` uses:
 
 ```sh
 mpirun -np <mpi_nproc> ./PAWSIM.exe <run_name>_in .
 ```
 
-For scheduler runs, `createRunScript` now requests `mpi_nproc` tasks in the
-cluster template. SGE/GridEngine templates launch with
-`mpirun -np ${NSLOTS:-<mpi_nproc>}`, while the SLURM template launches with
+PAWSIM asks MPI to choose a 2-D Cartesian rank layout by default. To force a
+particular layout, set `mpiNx` and `mpiNy` in the input file:
+
+```text
+mpiNx 3
+mpiNy 2
+```
+
+This is useful for distributed multigrid because MPI's default layout choice
+does not know which orientation gives cleaner local 2:1 coarsening. The Matlab
+helper `suggest_grid` can suggest grid dimensions and a matching
+`mpiNx`/`mpiNy` setting for a target resolution and rank count. The product
+`mpiNx*mpiNy` must match the MPI rank count used by `mpirun`/`srun`.
+The example setup scripts enforce this by deriving `mpi_nproc` from
+`mpiNx*mpiNy` whenever both layout parameters are set; if both are left zero,
+the scripts choose a layout from `mpi_nproc` using `suggest_grid`.
+
+For scheduler runs, `createRunScript` requests `mpi_nproc` total MPI tasks.
+Set `mpi_launcher = ''` to use the default launcher. Set `mpi_nodes = 0` or
+`mpi_tasks_per_node = 0` to leave those scheduler placement fields unspecified.
+Nonzero `mpi_nodes` and `mpi_tasks_per_node` values are used by the SLURM
+template to request a specific placement, e.g. on a 20-core-per-node cluster:
+
+```matlab
+use_mpi = true;
+mpiNx = 5;
+mpiNy = 8;
+mpi_nodes = 2;
+mpi_tasks_per_node = 20;
+```
+
+SGE/GridEngine templates launch with `mpirun -np ${NSLOTS:-<mpi_nproc>}`,
+while the SLURM template launches with
 `srun -n ${SLURM_NTASKS:-<mpi_nproc>}`. Pass a non-empty `mpi_launcher` string
 to override this on a particular machine.
 
@@ -138,6 +168,15 @@ allowing cases such as 250 x 250 to use `pressureSolver 2` without reverting
 the whole pressure solve to gathered multigrid. Timing output marks true
 whole-solver fallbacks with `fallback=1`, and the summary reports
 `fallback_solves`.
+
+Distributed multigrid currently requires the first coarsening to preserve exact
+local 2:1 nesting on every rank. Rank counts do not need to be powers of two:
+a 3 x 2 rank layout can use the distributed path for grids such as
+`3*2^n` by `2*2^n`, where every rank starts with a power-of-two local tile. A
+3 x 2 layout on a 256 x 256 grid, however, starts with 85/85/86-cell x-tiles
+and automatically falls back to gathered multigrid. The hierarchy also stops
+before creating smaller coarse-level communicators and uses the gathered coarse
+tail from that point, avoiding the fragile agglomerated-communicator path.
 
 ## AWSIM Compatibility
 

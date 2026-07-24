@@ -96,6 +96,8 @@ void pawsim_config_defaults (pawsim_config * cfg)
   cfg->wDiaNrecs = 1;
   cfg->maxiters = 10000;
   cfg->pressureSolver = PAWSIM_PRESSURE_SOLVER_SOR;
+  cfg->mpiNx = 0;
+  cfg->mpiNy = 0;
   cfg->useWind = false;
   cfg->useFbaro = false;
   cfg->useRelax = false;
@@ -228,6 +230,8 @@ bool pawsim_config_read (const char * fname, pawsim_config * cfg, FILE * errstrm
     else if (strcmp(key,"tauNrecs") == 0) cfg->tauNrecs = (uint) strtoul(value,NULL,10);
     else if (strcmp(key,"wDiaNrecs") == 0) cfg->wDiaNrecs = (uint) strtoul(value,NULL,10);
     else if (strcmp(key,"maxiters") == 0) cfg->maxiters = (uint) strtoul(value,NULL,10);
+    else if (strcmp(key,"mpiNx") == 0) cfg->mpiNx = atoi(value);
+    else if (strcmp(key,"mpiNy") == 0) cfg->mpiNy = atoi(value);
     else if (strcmp(key,"use_MG") == 0) cfg->use_MG = (atoi(value) != 0);
     else if (strcmp(key,"pressureSolver") == 0)
     {
@@ -392,6 +396,24 @@ bool pawsim_config_validate (const pawsim_config * cfg, FILE * errstrm)
     if (errstrm != NULL)
     {
       fprintf(errstrm,"ERROR: Unknown pressureSolver identifier\n");
+    }
+    return false;
+  }
+
+  if (((cfg->mpiNx == 0) || (cfg->mpiNy == 0))
+   && ((cfg->mpiNx != 0) || (cfg->mpiNy != 0)))
+  {
+    if (errstrm != NULL)
+    {
+      fprintf(errstrm,"ERROR: mpiNx and mpiNy must both be specified or both omitted\n");
+    }
+    return false;
+  }
+  if ((cfg->mpiNx < 0) || (cfg->mpiNy < 0))
+  {
+    if (errstrm != NULL)
+    {
+      fprintf(errstrm,"ERROR: mpiNx and mpiNy must be non-negative\n");
     }
     return false;
   }

@@ -1013,6 +1013,51 @@ static void dmg_choose_coarse_dims (uint Nx, uint Ny, const int prev_dims[2],
   }
 }
 
+/** Test one dimension for exact local 2:1 nesting with fixed rank count. */
+static bool dmg_dim_is_nested_after_coarsen (uint N, int dim)
+{
+  uint coord;
+  uint Nc;
+
+  if ((dim <= 0) || (N % 2 != 0))
+  {
+    return false;
+  }
+
+  Nc = coarsen_size(N);
+  for (coord = 0; coord < (uint) dim; coord ++)
+  {
+    uint fine_start = block_start_rank(N,coord,(uint) dim);
+    uint fine_size = block_size_rank(N,coord,(uint) dim);
+    uint coarse_start = block_start_rank(Nc,coord,(uint) dim);
+    uint coarse_size = block_size_rank(Nc,coord,(uint) dim);
+
+    if ((fine_start != 2*coarse_start) || (fine_size != 2*coarse_size))
+    {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/*
+ * Return true when level 0 can use at least one clean distributed coarsening.
+ * Non-nested first transitions enter the fragile gathered-transfer path before
+ * any useful distributed hierarchy exists, so they should use gathered MG.
+ */
+static bool dmg_can_start_with_local_transfers (const pawsim_domain * dom)
+{
+  if ((dom->Nx <= PAWSIM_DMG_MIN_GLOBAL) || (dom->Ny <= PAWSIM_DMG_MIN_GLOBAL)
+   || (dom->Nx % 2 != 0) || (dom->Ny % 2 != 0))
+  {
+    return false;
+  }
+
+  return dmg_dim_is_nested_after_coarsen(dom->Nx,dom->dims[0])
+      && dmg_dim_is_nested_after_coarsen(dom->Ny,dom->dims[1]);
+}
+
 /*
  * Create the domain metadata for one multigrid level.
  *
@@ -1224,6 +1269,15 @@ static bool dmg_build_hierarchy (pawsim_dmg_hierarchy * mg, const pawsim_context
       active_cells_x = Nx_c / (uint) coarse_dims[0];
       active_cells_y = Ny_c / (uint) coarse_dims[1];
       if ((active_cells_x == 0) || (active_cells_y == 0))
+      {
+        break;
+      }
+      /*
+       * Smaller active communicators are the fragile case for non-power-of-two
+       * rank layouts. Stop here and let the bottom level use the gathered
+       * coarse tail instead of creating an agglomerated level.
+       */
+      if ((coarse_dims[0] != dims[0]) || (coarse_dims[1] != dims[1]))
       {
         break;
       }
@@ -2074,6 +2128,24 @@ static uint solve_pressure_mg_distributed (pawsim_context * ctx)
   pawsim_dmg_hierarchy mg;
   uint cycles = 0;
   real max_update = ctx->cfg.pi_tol + 1;
+
+  /*
+   * The distributed multigrid transfer operators need at least one clean local
+   * 2:1 coarsening from the model rank layout. Otherwise the solve starts in
+   * the fragile gathered-transition path, so use the gathered-MG fallback.
+   */
+  if (!dmg_can_start_with_local_transfers(&ctx->dom))
+  {
+    if (ctx->dom.rank == 0)
+    {
+      fprintf(stderr,
+              "WARNING: Distributed MG needs locally nested grid/rank coarsening; using gathered MG for %u x %u grid on rank grid %d x %d\n",
+              ctx->dom.Nx,ctx->dom.Ny,ctx->dom.dims[0],ctx->dom.dims[1]);
+    }
+    ctx->pressure_last_solver = PAWSIM_PRESSURE_SOLVER_MG_GATHERED;
+    ctx->pressure_last_fallback = true;
+    return solve_pressure_mg_gathered(ctx);
+  }
 
   if (!dmg_build_hierarchy(&mg,ctx))
   {

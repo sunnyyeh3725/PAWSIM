@@ -8,7 +8,9 @@
 function setparams_cavity (local_home_dir,run_name)
   
   %%% Load common matlab scripts/functions
-  addpath ../matlab_common;
+  script_dir = fileparts(mfilename('fullpath'));
+  repo_dir = fullfile(script_dir,'..','..');
+  addpath(fullfile(repo_dir,'matlab_common'));
 
   %%% Load constant parameters 
   constants;
@@ -19,7 +21,7 @@ function setparams_cavity (local_home_dir,run_name)
   local_run_dir = fullfile(local_home_dir,run_name);
   mkdir(local_run_dir);
   pfname = fullfile(local_run_dir,[run_name,'_in']);   
-  model_code_dir = fullfile('../../',model_code_dir_name);
+  model_code_dir = fullfile(repo_dir,model_code_dir_name);
   
   %%% Cluster config
   %%% NOTE: You will need to edit matlab_common/createRunScript to add a
@@ -33,9 +35,22 @@ function setparams_cavity (local_home_dir,run_name)
   use_mpi = false;
   mpi_nproc = 1;
   mpi_launcher = '';
+  mpi_nodes = 0;
+  mpi_tasks_per_node = 0;
+  mpiNx = 0;
+  mpiNy = 0;
   %%% To generate a PAWSIM/MPI run, set e.g.
-  %%% exec_name = 'PAWSIM.exe'; model_code_dir = fullfile('../../','pawsim');
-  %%% use_mpi = true; mpi_nproc = 4;
+  %%% exec_name = 'PAWSIM.exe'; model_code_dir_name = 'model_code';
+  %%% use_mpi = true; mpiNx = 2; mpiNy = 2;
+  %%% For multi-node SLURM runs, also set e.g.
+  %%% mpi_nodes = 2; mpi_tasks_per_node = 20; mpiNx = 5; mpiNy = 8;
+  if (((mpiNx == 0) && (mpiNy ~= 0)) || ((mpiNx ~= 0) && (mpiNy == 0)))
+    error('mpiNx and mpiNy must both be specified or both left zero');
+  end
+  if ((mpiNx > 0) && (mpiNy > 0))
+    use_mpi = true;
+    mpi_nproc = mpiNx*mpiNy;
+  end
   
 
   %%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -83,7 +98,20 @@ function setparams_cavity (local_home_dir,run_name)
   %%% Grids
   Nlay = 2;
   Ny = 256;
-  Nx = Ny/4;  
+  Nx = Ny/4;
+  if (use_mpi && (mpi_nproc > 1))
+    if ((mpiNx > 0) && (mpiNy > 0))
+      grid = suggest_grid(Nx,Ny,mpi_nproc,'nshow',1,'mpi_dims',[mpiNx mpiNy]);
+    else
+      grid = suggest_grid(Nx,Ny,mpi_nproc,'nshow',1);
+    end
+    Nx = grid(1).Nx;
+    Ny = grid(1).Ny;
+    mpiNx = grid(1).mpiNx;
+    mpiNy = grid(1).mpiNy;
+    fprintf('Using PAWSIM grid %d x %d on MPI layout %d x %d\n', ...
+            Nx,Ny,grid(1).mpi_dims(1),grid(1).mpi_dims(2));
+  end
   dy = Ly/Ny;  
   dx = Lx/Nx;
   xx_q = 0:dx:Lx;
@@ -166,6 +194,10 @@ function setparams_cavity (local_home_dir,run_name)
   PARAMS = addParameter(PARAMS,'Nlay',Nlay,PARM_INT);
   PARAMS = addParameter(PARAMS,'Nx',Nx,PARM_INT);
   PARAMS = addParameter(PARAMS,'Ny',Ny,PARM_INT);
+  if ((mpiNx > 0) && (mpiNy > 0))
+    PARAMS = addParameter(PARAMS,'mpiNx',mpiNx,PARM_INT);
+    PARAMS = addParameter(PARAMS,'mpiNy',mpiNy,PARM_INT);
+  end
   PARAMS = addParameter(PARAMS,'dt',dt,PARM_REALF);
   PARAMS = addParameter(PARAMS,'savefrequency',savefreq,PARM_REALF);
   PARAMS = addParameter(PARAMS,'savefreqEZ',savefreqEZ,PARM_REALF);
@@ -373,6 +405,8 @@ function setparams_cavity (local_home_dir,run_name)
                      cluster_home_dir, ...
                      use_mpi, ...
                      mpi_nproc, ...
-                     mpi_launcher);
+                     mpi_launcher, ...
+                     mpi_nodes, ...
+                     mpi_tasks_per_node);
 
 end

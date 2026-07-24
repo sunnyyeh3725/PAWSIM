@@ -44,7 +44,8 @@ void pawsim_mpi_finalize (void);
 
 /* Build the Cartesian rank layout and each rank's owned global tile. */
 bool pawsim_domain_init (pawsim_domain * dom, uint Nx, uint Ny, uint nghost,
-                         bool periodic_x, bool periodic_y);
+                         bool periodic_x, bool periodic_y,
+                         int requested_nx, int requested_ny);
 
 /* Print a concise rank/local-domain summary for run logs. */
 void pawsim_domain_print (const pawsim_domain * dom);

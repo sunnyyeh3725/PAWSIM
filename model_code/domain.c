@@ -40,7 +40,8 @@ void pawsim_mpi_finalize (void)
  * Wall flags are represented indirectly through non-periodic MPI dimensions.
  */
 bool pawsim_domain_init (pawsim_domain * dom, uint Nx, uint Ny, uint nghost,
-                         bool periodic_x, bool periodic_y)
+                         bool periodic_x, bool periodic_y,
+                         int requested_nx, int requested_ny)
 {
   if (dom == NULL)
   {
@@ -64,10 +65,24 @@ bool pawsim_domain_init (pawsim_domain * dom, uint Nx, uint Ny, uint nghost,
 
     dom->dims[0] = 0;
     dom->dims[1] = 0;
+    if ((requested_nx != 0) || (requested_ny != 0))
+    {
+      if ((requested_nx <= 0) || (requested_ny <= 0)
+       || (requested_nx*requested_ny != dom->size))
+      {
+        if (dom->rank == 0)
+        {
+          fprintf(stderr,"ERROR: mpiNx=%d and mpiNy=%d do not match %d MPI ranks\n",
+                  requested_nx,requested_ny,dom->size);
+        }
+        return false;
+      }
+      dom->dims[0] = requested_nx;
+      dom->dims[1] = requested_ny;
+    }
     /*
-     * Let MPI choose a near-square process grid. This is simple and usually
-     * good for 2-D stencil work; performance-specific layouts can be added
-     * later if needed.
+     * Let MPI choose a near-square process grid unless mpiNx/mpiNy fixed the
+     * layout. MPI does not know about PAWSIM's multigrid nesting preferences.
      */
     MPI_Dims_create(dom->size,2,dom->dims);
 

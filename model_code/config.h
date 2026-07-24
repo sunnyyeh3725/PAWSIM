@@ -66,6 +66,8 @@ typedef struct pawsim_config
   uint wDiaNrecs;
   uint maxiters;
   uint pressureSolver;
+  int mpiNx;
+  int mpiNy;
   bool useWind;
   bool useFbaro;
   bool useRelax;

@@ -388,7 +388,9 @@ int main (int argc, char ** argv)
    * Domain periodicity is the inverse of the AWSIM wall flags. PAWSIM_NG=3 is
    * retained because the TW81 stencil reaches farther in the q-grid direction.
    */
-  if (!pawsim_domain_init(&ctx.dom,ctx.cfg.Nx,ctx.cfg.Ny,PAWSIM_NG,!ctx.cfg.useWallEW,!ctx.cfg.useWallNS))
+  if (!pawsim_domain_init(&ctx.dom,ctx.cfg.Nx,ctx.cfg.Ny,PAWSIM_NG,
+                          !ctx.cfg.useWallEW,!ctx.cfg.useWallNS,
+                          ctx.cfg.mpiNx,ctx.cfg.mpiNy))
   {
     fprintf(stderr,"ERROR: Could not initialize PAWSIM domain\n");
     freeContext(&ctx);

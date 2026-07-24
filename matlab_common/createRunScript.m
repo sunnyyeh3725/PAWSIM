@@ -22,10 +22,14 @@
 %%%                     Add your own!
 %%% cluster_home_dir    Base directory path to hold experiment folder on 
 %%%                     the remote computing cluster
-%%% use_mpi             Optional. Set true to run through MPI. Default false.
-%%% mpi_nproc           Optional. Number of MPI ranks to request/use. Default 1.
-%%% mpi_launcher        Optional. Override the MPI launch command. If blank,
+%%% use_mpi             Set true to run through MPI.
+%%% mpi_nproc           Number of MPI ranks to request/use.
+%%% mpi_launcher        Override the MPI launch command. If blank,
 %%%                     use mpirun locally/SGE and srun under SLURM.
+%%% mpi_nodes           Scheduler node count. Set 0 to leave this
+%%%                     unspecified.
+%%% mpi_tasks_per_node  Scheduler MPI tasks per node. Set 0 to leave this
+%%%                     unspecified.
 %%%
 function createRunScript (  local_home_dir, ...
                             run_name, ...
@@ -37,27 +41,26 @@ function createRunScript (  local_home_dir, ...
                             uname, ...
                             cluster_addr, ...
                             cluster_home_dir, ...
-                            varargin)
+                            use_mpi, ...
+                            mpi_nproc, ...
+                            mpi_launcher, ...
+                            mpi_nodes, ...
+                            mpi_tasks_per_node)
 
-  %%% Optional MPI configuration. Keeping these as trailing optional arguments
-  %%% preserves all existing PAWSIM setup scripts.
-  use_mpi = false;
-  mpi_nproc = 1;
-  mpi_launcher = '';
-  if (length(varargin) >= 1)
-    use_mpi = varargin{1};
-  end
-  if (length(varargin) >= 2)
-    mpi_nproc = varargin{2};
-  end
-  if (length(varargin) >= 3)
-    mpi_launcher = varargin{3};
-  end
+  %%% Explicit MPI configuration. PAWSIM is a standalone package, so run-script
+  %%% generation now requires all scheduler/MPI controls to be supplied by the
+  %%% setup script rather than hidden in compatibility defaults.
   if (mpi_nproc > 1)
     use_mpi = true;
   end
   if (mpi_nproc < 1)
     error('mpi_nproc must be at least 1');
+  end
+  if (mpi_nodes < 0)
+    error('mpi_nodes must be non-negative');
+  end
+  if (mpi_tasks_per_node < 0)
+    error('mpi_tasks_per_node must be non-negative');
   end
 
   %%% File/directory names    
@@ -80,7 +83,7 @@ function createRunScript (  local_home_dir, ...
 
   %%% To use intel compilers, need to add executables and libraries to system path
   if (use_intel)
-    fprintf(sfid,'source /opt/intel/oneapi/setvars.sh\n');
+    fprintf(sfid,'source /opt/intel/bin/compilervars.sh intel64\n');
   end
 
   %%% This line executes the C code. For MPI jobs, the scheduler scripts below
@@ -99,9 +102,9 @@ function createRunScript (  local_home_dir, ...
   %%% PBS submission requires a PBS script to be prepared
   if (use_pbs)
     
-    pbsfid = fopen(fullfile(local_run_dir,'run_pawsim'),'w');
+    pbsfid = fopen(fullfile(local_run_dir,'run_awsim'),'w');
     if (pbsfid == -1)
-      error(['Could not open ',fullfile(local_run_dir,'run_pawsim')]);
+      error(['Could not open ',fullfile(local_run_dir,'run_awsim')]);
     end
     
     switch (cluster_addr)
@@ -138,7 +141,7 @@ function createRunScript (  local_home_dir, ...
         '# \n' ...
         '\n'];
 
-        fprintf(sfid,'qsub run_pawsim'); 
+        fprintf(sfid,'qsub run_awsim'); 
         if (use_mpi && isempty(mpi_launcher))
           run_str = ['mpirun -np ${NSLOTS:-',num2str(mpi_nproc),'} ./',exec_name,' ',run_name,'_in ','. \n'];
         end
@@ -163,12 +166,17 @@ function createRunScript (  local_home_dir, ...
           '#  \n' ...
           '# MPI task request. Set mpi_nproc in the setup script.  \n' ...
           '#SBATCH --ntasks=',num2str(mpi_nproc),'  \n' ...
-          '#SBATCH --cpus-per-task=1         # Use 1 CPU \n' ...
+          '#SBATCH --cpus-per-task=1         # Use 1 CPU per MPI rank \n'];
+        if (mpi_nodes > 0)
+          pbsstr = [pbsstr, ...
+          '#SBATCH --nodes=',num2str(mpi_nodes),'  \n'];
+        end
+        if (mpi_tasks_per_node > 0)
+          pbsstr = [pbsstr, ...
+          '#SBATCH --ntasks-per-node=',num2str(mpi_tasks_per_node),'  \n'];
+        end
+        pbsstr = [pbsstr, ...
           '#SBATCH --mem-per-cpu=3G          # Request memory per core \n' ...
-          '# \n' ...
-          '# --- SHARING DIRECTIVE --- \n' ...
-          '#SBATCH --oversubscribe           # Allows other jobs to share this node \n' ...
-          '#  \n' ...
           '# Output file  \n' ...
           '#SBATCH --output=output.txt  \n' ...
           '#  \n' ...
@@ -185,7 +193,7 @@ function createRunScript (  local_home_dir, ...
           '#  \n' ...
           '# SLURM will set SLURM_NTASKS for MPI launch commands.  \n'];
 
-        fprintf(sfid,'sbatch run_pawsim'); 
+        fprintf(sfid,'sbatch run_awsim'); 
         if (use_mpi && isempty(mpi_launcher))
           run_str = ['srun -n ${SLURM_NTASKS:-',num2str(mpi_nproc),'} ./',exec_name,' ',run_name,'_in ','. \n'];
         end
@@ -224,7 +232,7 @@ function createRunScript (  local_home_dir, ...
         '#$ -m bea \n' ...
         '#$ -l h_data=1G,h_rt=336:00:00,highp \n'];
 
-        fprintf(sfid,'qsub run_pawsim'); 
+        fprintf(sfid,'qsub run_awsim'); 
         if (use_mpi && isempty(mpi_launcher))
           run_str = ['mpirun -np ${NSLOTS:-',num2str(mpi_nproc),'} ./',exec_name,' ',run_name,'_in ','. \n'];
         end
