@@ -1,4 +1,3 @@
-
 %%%
 %%% loadParams.m
 %%%
@@ -86,6 +85,13 @@ if (~startTime_found)
   else
     startTime = 0;
   end
+end
+
+%%% Overwrite (this is for the simulation that has the continuation-purpose restart)
+if starttimeoverwrite
+    restart = 0;
+    startTime = 0;
+    n0=0;
 end
 
 %%% Calculate missing time parameter
