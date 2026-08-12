@@ -4,6 +4,7 @@
 %%%
 function [KE,PE,E,Z,t] = readEZfile (local_home_dir,run_name)
 
+  starttimeoverwrite = setstarttimeow(run_name);  
   %%% Load parameters
   loadParams;
   

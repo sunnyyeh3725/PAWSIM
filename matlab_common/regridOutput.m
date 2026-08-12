@@ -22,6 +22,7 @@ function regridOutput (local_home_dir, run_name, srcIter, Nx_i, Ny_i, destDir, d
   end
   
   %%% Load source simulation parameters
+  starttimeoverwrite = setstarttimeow(run_name);
   loadParams;
   
   %%% Check grid spacings match
