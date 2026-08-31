@@ -759,23 +759,27 @@ bool pawsim_diagnostics_write_budgets_if_due (pawsim_context * ctx, uint n)
   {
     OUTN_UMOM_Q,OUTN_UMOM_GRADM,OUTN_UMOM_GRADKE,OUTN_UMOM_DHDT,
     OUTN_UMOM_A2,OUTN_UMOM_A4,OUTN_UMOM_RDRAG,OUTN_UMOM_RSURF,
-    OUTN_UMOM_CDBOT,OUTN_UMOM_CDSURF,OUTN_UMOM_WIND
+    OUTN_UMOM_CDBOT,OUTN_UMOM_CDSURF,OUTN_UMOM_WIND,OUTN_UMOM_BUOY,
+    OUTN_UMOM_RELAX,OUTN_UMOM_WDIA,OUTN_UMOM_FBARO,OUTN_UMOM_DIAVISC
   };
   static const char * vmom_names[PAWSIM_VMOM_NTERMS] =
   {
     OUTN_VMOM_Q,OUTN_VMOM_GRADM,OUTN_VMOM_GRADKE,OUTN_VMOM_DHDT,
     OUTN_VMOM_A2,OUTN_VMOM_A4,OUTN_VMOM_RDRAG,OUTN_VMOM_RSURF,
-    OUTN_VMOM_CDBOT,OUTN_VMOM_CDSURF,OUTN_VMOM_WIND
+    OUTN_VMOM_CDBOT,OUTN_VMOM_CDSURF,OUTN_VMOM_WIND,OUTN_VMOM_BUOY,
+    OUTN_VMOM_RELAX,OUTN_VMOM_WDIA,OUTN_VMOM_FBARO,OUTN_VMOM_DIAVISC
   };
   static const char * thic_names[PAWSIM_THIC_NTERMS] =
   {
-    OUTN_THIC_ADV
+    OUTN_THIC_ADV,OUTN_THIC_RELAX
   };
   static const char * energy_names[PAWSIM_ENERGY_NTERMS] =
   {
     OUTN_ENERGY_ADV,OUTN_ENERGY_GRADM,OUTN_ENERGY_WIND,
     OUTN_ENERGY_RDRAG,OUTN_ENERGY_RSURF,OUTN_ENERGY_CDBOT,
-    OUTN_ENERGY_CDSURF,OUTN_ENERGY_A4
+    OUTN_ENERGY_CDSURF,OUTN_ENERGY_A2,OUTN_ENERGY_A4,
+    OUTN_ENERGY_WDIAPE,OUTN_ENERGY_WDIAKE,OUTN_ENERGY_FBARO,
+    OUTN_ENERGY_BUOY,OUTN_ENERGY_RELAX,OUTN_ENERGY_DIAVISC
   };
   static const char * trac_names[PAWSIM_TRAC_NTERMS] =
   {
@@ -876,7 +880,8 @@ bool pawsim_diagnostics_write_model_state (pawsim_context * ctx, uint n)
   {
     if (!write_layer_field(ctx->outdir,"U",k,n,&ctx->state.u[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,"V",k,n,&ctx->state.v[k],&ctx->dom)
-     || !write_layer_field(ctx->outdir,"H",k,n,&ctx->state.h[k],&ctx->dom))
+     || !write_layer_field(ctx->outdir,"H",k,n,&ctx->state.h[k],&ctx->dom)
+     || !write_layer_field(ctx->outdir,"W",k,n,&ctx->work.wdia[k],&ctx->dom))
     {
       return false;
     }
@@ -887,12 +892,11 @@ bool pawsim_diagnostics_write_model_state (pawsim_context * ctx, uint n)
       return false;
     }
   }
-  /*
+
   if (!write_layer_field(ctx->outdir,"W",ctx->cfg.Nlay,n,&ctx->work.wdia[ctx->cfg.Nlay],&ctx->dom))
   {
     return false;
   }
-  */
 
   if (ctx->cfg.useRL)
   {
