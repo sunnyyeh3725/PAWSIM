@@ -30,7 +30,7 @@
 static void diag_add (pawsim_field2d ** terms, uint term, uint k, uint i, uint j,
                       real value)
 {
-  if (terms != NULL)
+  if ((terms != NULL) && (terms[term] != NULL))
   {
     terms[term][k].a[i][j] += value;
   }

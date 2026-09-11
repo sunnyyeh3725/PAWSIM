@@ -165,6 +165,10 @@ static void zero_budget_terms (pawsim_field2d ** terms, uint nterms, uint nlay)
 
   for (m = 0; m < nterms; m ++)
   {
+    if (terms[m] == NULL)
+    {
+      continue;
+    }
     zero_layer_fields(terms[m],nlay);
   }
 }
@@ -200,7 +204,6 @@ bool pawsim_diagnostics_alloc (pawsim_context * ctx)
       && alloc_layer_fields(&ctx->avg_h,ctx->cfg.Nlay,&ctx->dom)
       && alloc_layer_fields(&ctx->avg_M,ctx->cfg.Nlay,&ctx->dom)
       && alloc_layer_fields(&ctx->avg_b,ctx->cfg.useTracer ? ctx->cfg.Nlay : 0,&ctx->dom)
-      && alloc_layer_fields(&ctx->avg_wdia,ctx->cfg.Nlay+1,&ctx->dom)
       && alloc_layer_fields(&ctx->avg_hu,ctx->cfg.Nlay,&ctx->dom)
       && alloc_layer_fields(&ctx->avg_hv,ctx->cfg.Nlay,&ctx->dom)
       && alloc_layer_fields(&ctx->avg_huu,ctx->cfg.Nlay,&ctx->dom)
@@ -222,7 +225,6 @@ void pawsim_diagnostics_free (pawsim_context * ctx)
   free_layer_fields(ctx->avg_h,ctx->cfg.Nlay);
   free_layer_fields(ctx->avg_M,ctx->cfg.Nlay);
   free_layer_fields(ctx->avg_b,ctx->cfg.useTracer ? ctx->cfg.Nlay : 0);
-  free_layer_fields(ctx->avg_wdia,ctx->cfg.Nlay+1);
   free_layer_fields(ctx->avg_hu,ctx->cfg.Nlay);
   free_layer_fields(ctx->avg_hv,ctx->cfg.Nlay);
   free_layer_fields(ctx->avg_huu,ctx->cfg.Nlay);
@@ -244,7 +246,6 @@ void pawsim_diagnostics_zero_averages (pawsim_context * ctx)
   zero_layer_fields(ctx->avg_h,ctx->cfg.Nlay);
   zero_layer_fields(ctx->avg_M,ctx->cfg.Nlay);
   zero_layer_fields(ctx->avg_b,ctx->cfg.useTracer ? ctx->cfg.Nlay : 0);
-  zero_layer_fields(ctx->avg_wdia,ctx->cfg.Nlay+1);
   zero_layer_fields(ctx->avg_hu,ctx->cfg.Nlay);
   zero_layer_fields(ctx->avg_hv,ctx->cfg.Nlay);
   zero_layer_fields(ctx->avg_huu,ctx->cfg.Nlay);
@@ -291,10 +292,6 @@ static void exchange_average_halos (pawsim_context * ctx)
     {
       pawsim_field2d_exchange_scalar_halo(&ctx->avg_b[k],&ctx->dom);
     }
-  }
-  for (k = 0; k < ctx->cfg.Nlay+1; k ++)
-  {
-    pawsim_field2d_exchange_scalar_halo(&ctx->avg_wdia[k],&ctx->dom);
   }
   pawsim_field2d_exchange_scalar_halo(&ctx->avg_pi,&ctx->dom);
 }
@@ -344,7 +341,6 @@ bool pawsim_diagnostics_accumulate_averages (pawsim_context * ctx)
         ctx->avg_h[k].a[i][j] += dtfac * ctx->state.h[k].a[i][j];
         ctx->avg_M[k].a[i][j] += dtfac * (ctx->work.MM_B[k].a[i][j]
                                       + (ctx->cfg.useRL ? ctx->pi.a[i][j] : 0));
-        ctx->avg_wdia[k].a[i][j] += dtfac * ctx->work.wdia[k].a[i][j];
         ctx->avg_hu[k].a[i][j] += dtfac * ctx->work.h_west[k].a[i][j] * ctx->state.u[k].a[i][j];
         ctx->avg_hv[k].a[i][j] += dtfac * ctx->work.h_south[k].a[i][j] * ctx->state.v[k].a[i][j];
         ctx->avg_huu[k].a[i][j] += dtfac * ctx->work.h_west[k].a[i][j]
@@ -365,7 +361,6 @@ bool pawsim_diagnostics_accumulate_averages (pawsim_context * ctx)
     for (j = g; j < g+ctx->dom.ny; j ++)
     {
       real dtfac = avg_fac * ctx->cfg.dt;
-      ctx->avg_wdia[ctx->cfg.Nlay].a[i][j] += dtfac * ctx->work.wdia[ctx->cfg.Nlay].a[i][j];
       ctx->avg_pi.a[i][j] += dtfac * ctx->pi.a[i][j];
     }
   }
@@ -386,7 +381,6 @@ static bool write_average_state (pawsim_context * ctx, uint n)
      || !write_layer_field(ctx->outdir,OUTN_V_AVG,k,n,&ctx->avg_v[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,OUTN_H_AVG,k,n,&ctx->avg_h[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,OUTN_M_AVG,k,n,&ctx->avg_M[k],&ctx->dom)
-     || !write_layer_field(ctx->outdir,OUTN_W_AVG,k,n,&ctx->avg_wdia[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,OUTN_HU_AVG,k,n,&ctx->avg_hu[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,OUTN_HV_AVG,k,n,&ctx->avg_hv[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,OUTN_HUU_AVG,k,n,&ctx->avg_huu[k],&ctx->dom)
@@ -401,11 +395,6 @@ static bool write_average_state (pawsim_context * ctx, uint n)
     {
       return false;
     }
-  }
-
-  if (!write_layer_field(ctx->outdir,OUTN_W_AVG,ctx->cfg.Nlay,n,&ctx->avg_wdia[ctx->cfg.Nlay],&ctx->dom))
-  {
-    return false;
   }
 
   if (ctx->cfg.useRL)
@@ -449,10 +438,6 @@ bool pawsim_diagnostics_write_averages_if_due (pawsim_context * ctx)
     {
       scale_field_interior(&ctx->avg_b[k],1/ctx->cfg.savefreqAvg);
     }
-  }
-  for (k = 0; k < ctx->cfg.Nlay+1; k ++)
-  {
-    scale_field_interior(&ctx->avg_wdia[k],1/ctx->cfg.savefreqAvg);
   }
   scale_field_interior(&ctx->avg_pi,1/ctx->cfg.savefreqAvg);
   exchange_average_halos(ctx);
@@ -715,6 +700,10 @@ static void scale_budget_terms (pawsim_field2d ** terms, uint nterms, uint nlay,
 
   for (m = 0; m < nterms; m ++)
   {
+    if (terms[m] == NULL)
+    {
+      continue;
+    }
     for (k = 0; k < nlay; k ++)
     {
       scale_field_interior(&terms[m][k],scale);
@@ -736,6 +725,10 @@ static bool write_budget_terms (pawsim_context * ctx, pawsim_field2d ** terms,
 
   for (m = 0; m < nterms; m ++)
   {
+    if ((terms[m] == NULL) || (names[m] == NULL))
+    {
+      continue;
+    }
     for (k = 0; k < ctx->cfg.Nlay; k ++)
     {
       if (!write_layer_field(ctx->outdir,names[m],k,n,&terms[m][k],&ctx->dom))
@@ -759,27 +752,26 @@ bool pawsim_diagnostics_write_budgets_if_due (pawsim_context * ctx, uint n)
   {
     OUTN_UMOM_Q,OUTN_UMOM_GRADM,OUTN_UMOM_GRADKE,OUTN_UMOM_DHDT,
     OUTN_UMOM_A2,OUTN_UMOM_A4,OUTN_UMOM_RDRAG,OUTN_UMOM_RSURF,
-    OUTN_UMOM_CDBOT,OUTN_UMOM_CDSURF,OUTN_UMOM_WIND,OUTN_UMOM_BUOY,
-    OUTN_UMOM_RELAX,OUTN_UMOM_WDIA,OUTN_UMOM_FBARO,OUTN_UMOM_DIAVISC
+    OUTN_UMOM_CDBOT,OUTN_UMOM_CDSURF,OUTN_UMOM_WIND,NULL,
+    NULL,NULL,NULL,NULL
   };
   static const char * vmom_names[PAWSIM_VMOM_NTERMS] =
   {
     OUTN_VMOM_Q,OUTN_VMOM_GRADM,OUTN_VMOM_GRADKE,OUTN_VMOM_DHDT,
     OUTN_VMOM_A2,OUTN_VMOM_A4,OUTN_VMOM_RDRAG,OUTN_VMOM_RSURF,
-    OUTN_VMOM_CDBOT,OUTN_VMOM_CDSURF,OUTN_VMOM_WIND,OUTN_VMOM_BUOY,
-    OUTN_VMOM_RELAX,OUTN_VMOM_WDIA,OUTN_VMOM_FBARO,OUTN_VMOM_DIAVISC
+    OUTN_VMOM_CDBOT,OUTN_VMOM_CDSURF,OUTN_VMOM_WIND,NULL,
+    NULL,NULL,NULL,NULL
   };
   static const char * thic_names[PAWSIM_THIC_NTERMS] =
   {
-    OUTN_THIC_ADV,OUTN_THIC_RELAX
+    OUTN_THIC_ADV,NULL
   };
   static const char * energy_names[PAWSIM_ENERGY_NTERMS] =
   {
     OUTN_ENERGY_ADV,OUTN_ENERGY_GRADM,OUTN_ENERGY_WIND,
     OUTN_ENERGY_RDRAG,OUTN_ENERGY_RSURF,OUTN_ENERGY_CDBOT,
-    OUTN_ENERGY_CDSURF,OUTN_ENERGY_A2,OUTN_ENERGY_A4,
-    OUTN_ENERGY_WDIAPE,OUTN_ENERGY_WDIAKE,OUTN_ENERGY_FBARO,
-    OUTN_ENERGY_BUOY,OUTN_ENERGY_RELAX,OUTN_ENERGY_DIAVISC
+    OUTN_ENERGY_CDSURF,NULL,OUTN_ENERGY_A4,
+    NULL,NULL,NULL,NULL,NULL,NULL
   };
   static const char * trac_names[PAWSIM_TRAC_NTERMS] =
   {
@@ -880,8 +872,7 @@ bool pawsim_diagnostics_write_model_state (pawsim_context * ctx, uint n)
   {
     if (!write_layer_field(ctx->outdir,"U",k,n,&ctx->state.u[k],&ctx->dom)
      || !write_layer_field(ctx->outdir,"V",k,n,&ctx->state.v[k],&ctx->dom)
-     || !write_layer_field(ctx->outdir,"H",k,n,&ctx->state.h[k],&ctx->dom)
-     || !write_layer_field(ctx->outdir,"W",k,n,&ctx->work.wdia[k],&ctx->dom))
+     || !write_layer_field(ctx->outdir,"H",k,n,&ctx->state.h[k],&ctx->dom))
     {
       return false;
     }
@@ -891,11 +882,6 @@ bool pawsim_diagnostics_write_model_state (pawsim_context * ctx, uint n)
     {
       return false;
     }
-  }
-
-  if (!write_layer_field(ctx->outdir,"W",ctx->cfg.Nlay,n,&ctx->work.wdia[ctx->cfg.Nlay],&ctx->dom))
-  {
-    return false;
   }
 
   if (ctx->cfg.useRL)

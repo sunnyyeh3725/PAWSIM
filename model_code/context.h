@@ -36,7 +36,6 @@ typedef struct pawsim_context
   pawsim_field2d * avg_h;
   pawsim_field2d * avg_M;
   pawsim_field2d * avg_b;
-  pawsim_field2d * avg_wdia;
   pawsim_field2d * avg_hu;
   pawsim_field2d * avg_hv;
   pawsim_field2d * avg_huu;

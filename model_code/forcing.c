@@ -17,7 +17,7 @@
 static void diag_add (pawsim_field2d ** terms, uint term, uint k, uint i, uint j,
                       real value)
 {
-  if (terms != NULL)
+  if ((terms != NULL) && (terms[term] != NULL))
   {
     terms[term][k].a[i][j] += value;
   }
@@ -269,14 +269,6 @@ void pawsim_forcing_apply (pawsim_context * ctx)
         {
           ctx->work.dt_u[k].a[il][jl] += ctx->state.Fbaro_x.a[il][jl];
           ctx->work.dt_v[k].a[il][jl] += ctx->state.Fbaro_y.a[il][jl];
-          diag_add(ctx->work.diag_umom,PAWSIM_UMOM_FBARO,k,il,jl,
-                   hwest*ctx->state.Fbaro_x.a[il][jl]*ctx->cfg.dt);
-          diag_add(ctx->work.diag_vmom,PAWSIM_VMOM_FBARO,k,il,jl,
-                   hsouth*ctx->state.Fbaro_y.a[il][jl]*ctx->cfg.dt);
-          diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_FBARO,k,il,jl,
-                   (hwest*ctx->state.Fbaro_x.a[il][jl]*ctx->work.u_w[k].a[il][jl]
-                  + hsouth*ctx->state.Fbaro_y.a[il][jl]*ctx->work.v_w[k].a[il][jl])
-                   * ctx->cfg.dt);
         }
         if ((ctx->cfg.linDragCoeff > 0) && (hwest != 0))
         {

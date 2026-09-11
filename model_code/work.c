@@ -69,6 +69,7 @@ static void free_layer_fields (pawsim_field2d * fields, uint Nlay)
 
 /** Allocate diagnostic-budget fields indexed as terms[term][layer]. */
 static bool alloc_term_fields (pawsim_field2d *** terms, uint nterms, uint nlay,
+                               bool (*term_enabled)(uint),
                                const pawsim_domain * dom)
 {
   uint m;
@@ -87,6 +88,10 @@ static bool alloc_term_fields (pawsim_field2d *** terms, uint nterms, uint nlay,
 
   for (m = 0; m < nterms; m ++)
   {
+    if ((term_enabled != NULL) && !term_enabled(m))
+    {
+      continue;
+    }
     if (!alloc_layer_fields(&(*terms)[m],nlay,dom))
     {
       return false;
@@ -94,6 +99,40 @@ static bool alloc_term_fields (pawsim_field2d *** terms, uint nterms, uint nlay,
   }
 
   return true;
+}
+
+static bool umom_term_enabled (uint term)
+{
+  return (term != PAWSIM_UMOM_BUOY)
+      && (term != PAWSIM_UMOM_RELAX)
+      && (term != PAWSIM_UMOM_WDIA)
+      && (term != PAWSIM_UMOM_FBARO)
+      && (term != PAWSIM_UMOM_DIAVISC);
+}
+
+static bool vmom_term_enabled (uint term)
+{
+  return (term != PAWSIM_VMOM_BUOY)
+      && (term != PAWSIM_VMOM_RELAX)
+      && (term != PAWSIM_VMOM_WDIA)
+      && (term != PAWSIM_VMOM_FBARO)
+      && (term != PAWSIM_VMOM_DIAVISC);
+}
+
+static bool thic_term_enabled (uint term)
+{
+  return term != PAWSIM_THIC_RELAX;
+}
+
+static bool energy_term_enabled (uint term)
+{
+  return (term != PAWSIM_ENERGY_A2)
+      && (term != PAWSIM_ENERGY_WDIAPE)
+      && (term != PAWSIM_ENERGY_WDIAKE)
+      && (term != PAWSIM_ENERGY_FBARO)
+      && (term != PAWSIM_ENERGY_BUOY)
+      && (term != PAWSIM_ENERGY_RELAX)
+      && (term != PAWSIM_ENERGY_DIAVISC);
 }
 
 /** Free diagnostic-budget fields allocated by alloc_term_fields(). */
@@ -125,6 +164,10 @@ static void zero_term_fields (pawsim_field2d ** terms, uint nterms, uint nlay)
 
   for (m = 0; m < nterms; m ++)
   {
+    if (terms[m] == NULL)
+    {
+      continue;
+    }
     for (k = 0; k < nlay; k ++)
     {
       pawsim_field2d_zero(&terms[m][k]);
@@ -136,7 +179,7 @@ static void zero_term_fields (pawsim_field2d ** terms, uint nterms, uint nlay)
 static void diag_add (pawsim_field2d ** terms, uint term, uint k, uint i, uint j,
                       real value)
 {
-  if (terms != NULL)
+  if ((terms != NULL) && (terms[term] != NULL))
   {
     terms[term][k].a[i][j] += value;
   }
@@ -308,15 +351,20 @@ bool pawsim_work_alloc (pawsim_work * work, const pawsim_config * cfg,
    || !alloc_layer_fields(&work->huu,cfg->Nlay,dom)
    || !alloc_layer_fields(&work->hvv,cfg->Nlay,dom)
    || ((cfg->savefreqUMom > 0)
-    && !alloc_term_fields(&work->diag_umom,PAWSIM_UMOM_NTERMS,cfg->Nlay,dom))
+    && !alloc_term_fields(&work->diag_umom,PAWSIM_UMOM_NTERMS,cfg->Nlay,
+                          umom_term_enabled,dom))
    || ((cfg->savefreqVMom > 0)
-    && !alloc_term_fields(&work->diag_vmom,PAWSIM_VMOM_NTERMS,cfg->Nlay,dom))
+    && !alloc_term_fields(&work->diag_vmom,PAWSIM_VMOM_NTERMS,cfg->Nlay,
+                          vmom_term_enabled,dom))
    || ((cfg->savefreqThic > 0)
-    && !alloc_term_fields(&work->diag_thic,PAWSIM_THIC_NTERMS,cfg->Nlay,dom))
+    && !alloc_term_fields(&work->diag_thic,PAWSIM_THIC_NTERMS,cfg->Nlay,
+                          thic_term_enabled,dom))
    || ((cfg->savefreqEnergy > 0)
-    && !alloc_term_fields(&work->diag_energy,PAWSIM_ENERGY_NTERMS,cfg->Nlay,dom))
+    && !alloc_term_fields(&work->diag_energy,PAWSIM_ENERGY_NTERMS,cfg->Nlay,
+                          energy_term_enabled,dom))
    || ((cfg->savefreqTracer > 0)
-    && !alloc_term_fields(&work->diag_trac,PAWSIM_TRAC_NTERMS,cfg->Nlay,dom)))
+    && !alloc_term_fields(&work->diag_trac,PAWSIM_TRAC_NTERMS,cfg->Nlay,
+                          NULL,dom)))
   {
     pawsim_work_free(work);
     return false;
@@ -1755,12 +1803,9 @@ void pawsim_work_calc_momentum_tendency (pawsim_work * work,
         diag_add(work->diag_umom,PAWSIM_UMOM_Q,k,i,j,hwest*rhs_u_q*cfg->dt);
         diag_add(work->diag_umom,PAWSIM_UMOM_A2,k,i,j,active_u ? rhs_u_A2*cfg->dt : 0);
         diag_add(work->diag_umom,PAWSIM_UMOM_A4,k,i,j,active_u ? rhs_u_A4*cfg->dt : 0);
-        diag_add(work->diag_umom,PAWSIM_UMOM_BUOY,k,i,j,rhs_u_buoy*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_GRADM,k,i,j,hwest*rhs_u_gradM*work->u_w[k].a[i][j]*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_ADV,k,i,j,hwest*(rhs_u_gradKE+rhs_u_q)*work->u_w[k].a[i][j]*cfg->dt);
-        diag_add(work->diag_energy,PAWSIM_ENERGY_A2,k,i,j,rhs_u_A2*work->u_w[k].a[i][j]*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_A4,k,i,j,rhs_u_A4*work->u_w[k].a[i][j]*cfg->dt);
-        diag_add(work->diag_energy,PAWSIM_ENERGY_BUOY,k,i,j,rhs_u_buoy*work->u_w[k].a[i][j]*cfg->dt);
 
         rhs_v_gradM = - (work->MM_B[k].a[i][j]-work->MM_B[k].a[i][j-1]) / dy;
         rhs_v_gradKE = - (work->KE_B[k].a[i][j]-work->KE_B[k].a[i][j-1]) / dy;
@@ -1839,12 +1884,9 @@ void pawsim_work_calc_momentum_tendency (pawsim_work * work,
         diag_add(work->diag_vmom,PAWSIM_VMOM_Q,k,i,j,hsouth*rhs_v_q*cfg->dt);
         diag_add(work->diag_vmom,PAWSIM_VMOM_A2,k,i,j,active_v ? rhs_v_A2*cfg->dt : 0);
         diag_add(work->diag_vmom,PAWSIM_VMOM_A4,k,i,j,active_v ? rhs_v_A4*cfg->dt : 0);
-        diag_add(work->diag_vmom,PAWSIM_VMOM_BUOY,k,i,j,rhs_v_buoy*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_GRADM,k,i,j,hsouth*rhs_v_gradM*work->v_w[k].a[i][j]*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_ADV,k,i,j,hsouth*(rhs_v_gradKE+rhs_v_q)*work->v_w[k].a[i][j]*cfg->dt);
-        diag_add(work->diag_energy,PAWSIM_ENERGY_A2,k,i,j,rhs_v_A2*work->v_w[k].a[i][j]*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_A4,k,i,j,rhs_v_A4*work->v_w[k].a[i][j]*cfg->dt);
-        diag_add(work->diag_energy,PAWSIM_ENERGY_BUOY,k,i,j,rhs_v_buoy*work->v_w[k].a[i][j]*cfg->dt);
 
         work->dt_u[k].a[i][j] = rhs_u;
         work->dt_v[k].a[i][j] = rhs_v;
@@ -1889,19 +1931,9 @@ void pawsim_work_calc_thickness_tendency (pawsim_work * work,
         rhs_relax = - (work->wdia[k].a[i][j] - work->wdia[k+1].a[i][j]);
         work->dt_h[k].a[i][j] = rhs_adv + rhs_relax;
         diag_add(work->diag_thic,PAWSIM_THIC_ADV,k,i,j,rhs_adv*cfg->dt);
-        diag_add(work->diag_thic,PAWSIM_THIC_RELAX,k,i,j,rhs_relax*cfg->dt);
         diag_add(work->diag_energy,PAWSIM_ENERGY_ADV,k,i,j,
                  0.5*(SQUARE(work->u_w[k].a[i][j])+SQUARE(work->v_w[k].a[i][j]))
                  * rhs_adv*cfg->dt);
-        diag_add(work->diag_energy,PAWSIM_ENERGY_WDIAKE,k,i,j,
-                 0.5*(SQUARE(work->u_w[k].a[i][j])+SQUARE(work->v_w[k].a[i][j]))
-                 * rhs_relax*cfg->dt);
-        diag_add(work->diag_energy,PAWSIM_ENERGY_WDIAPE,k,i,j,
-                 - state->geff[k] * (work->eta_w[k].a[i][j]*work->wdia[k].a[i][j]
-                                    - work->eta_w[k+1].a[i][j]*work->wdia[k+1].a[i][j])
-                 * cfg->dt
-                 - (-state->geff[k]*POW4(cfg->h0)/POW3(work->h_w[k].a[i][j])/3)
-                 * (-rhs_relax) * cfg->dt);
         diag_add(work->diag_trac,PAWSIM_TRAC_ADV,k,i,j,work->b_w[k].a[i][j]*rhs_adv*cfg->dt);
         diag_add(work->diag_trac,PAWSIM_TRAC_WDIA,k,i,j,work->b_w[k].a[i][j]*rhs_relax*cfg->dt);
       }
@@ -1910,8 +1942,10 @@ void pawsim_work_calc_thickness_tendency (pawsim_work * work,
     pawsim_field2d_exchange_scalar_halo(&work->dt_h[k],dom);
     if (work->diag_thic != NULL)
     {
-      pawsim_field2d_exchange_scalar_halo(&work->diag_thic[PAWSIM_THIC_ADV][k],dom);
-      pawsim_field2d_exchange_scalar_halo(&work->diag_thic[PAWSIM_THIC_RELAX][k],dom);
+      if (work->diag_thic[PAWSIM_THIC_ADV] != NULL)
+      {
+        pawsim_field2d_exchange_scalar_halo(&work->diag_thic[PAWSIM_THIC_ADV][k],dom);
+      }
     }
 
     for (i = g; i < g+work->dt_h[k].nx; i ++)
@@ -1924,17 +1958,10 @@ void pawsim_work_calc_thickness_tendency (pawsim_work * work,
                    + (work->hvv[k].a[i-1][j]-work->hvv[k].a[i-1][j+1]) / dy;
         real adv_s = (work->huu[k].a[i][j-1]-work->huu[k].a[i+1][j-1]) / dx
                    + (work->hvv[k].a[i][j-1]-work->hvv[k].a[i][j]) / dy;
-        real rel_c = - (work->wdia[k].a[i][j] - work->wdia[k+1].a[i][j]);
-        real rel_w = - (work->wdia[k].a[i-1][j] - work->wdia[k+1].a[i-1][j]);
-        real rel_s = - (work->wdia[k].a[i][j-1] - work->wdia[k+1].a[i][j-1]);
         real adv_u = 0.5*work->u_w[k].a[i][j]*(adv_c+adv_w);
-        real rel_u = 0.5*work->u_w[k].a[i][j]*(rel_c+rel_w);
         real adv_v = 0.5*work->v_w[k].a[i][j]*(adv_c+adv_s);
-        real rel_v = 0.5*work->v_w[k].a[i][j]*(rel_c+rel_s);
         diag_add(work->diag_umom,PAWSIM_UMOM_DHDT,k,i,j,adv_u*cfg->dt);
-        diag_add(work->diag_umom,PAWSIM_UMOM_WDIA,k,i,j,rel_u*cfg->dt);
         diag_add(work->diag_vmom,PAWSIM_VMOM_DHDT,k,i,j,adv_v*cfg->dt);
-        diag_add(work->diag_vmom,PAWSIM_VMOM_WDIA,k,i,j,rel_v*cfg->dt);
       }
     }
   }

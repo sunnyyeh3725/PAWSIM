@@ -12,16 +12,6 @@
 
 #include <math.h>
 
-/** Add a term to an optional diagnostic budget array. */
-static void diag_add (pawsim_field2d ** terms, uint term, uint k, uint i, uint j,
-                      real value)
-{
-  if (terms != NULL)
-  {
-    terms[term][k].a[i][j] += value;
-  }
-}
-
 /*
  * Compute diapycnal velocity from prescribed wDia records and/or thickness
  * restoring. This mirrors AWSIM's use of interface fluxes in both h and b.
@@ -195,10 +185,6 @@ void pawsim_restoring_apply_momentum (pawsim_context * ctx)
                      - ctx->state.uRelax[k].a[il][jl])
                     / ctx->state.uTime[k].a[il][jl];
           ctx->work.dt_u[k].a[il][jl] += rhs;
-          diag_add(ctx->work.diag_umom,PAWSIM_UMOM_RELAX,k,il,jl,
-                   ctx->work.h_west[k].a[il][jl]*rhs*ctx->cfg.dt);
-          diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_RELAX,k,il,jl,
-                   ctx->work.h_west[k].a[il][jl]*rhs*ctx->work.u_w[k].a[il][jl]*ctx->cfg.dt);
         }
         if (ctx->state.vTime[k].a[il][jl] > 0)
         {
@@ -206,10 +192,6 @@ void pawsim_restoring_apply_momentum (pawsim_context * ctx)
                      - ctx->state.vRelax[k].a[il][jl])
                     / ctx->state.vTime[k].a[il][jl];
           ctx->work.dt_v[k].a[il][jl] += rhs;
-          diag_add(ctx->work.diag_vmom,PAWSIM_VMOM_RELAX,k,il,jl,
-                   ctx->work.h_south[k].a[il][jl]*rhs*ctx->cfg.dt);
-          diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_RELAX,k,il,jl,
-                   ctx->work.h_south[k].a[il][jl]*rhs*ctx->work.v_w[k].a[il][jl]*ctx->cfg.dt);
         }
       }
     }

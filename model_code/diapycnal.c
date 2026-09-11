@@ -10,16 +10,6 @@
  */
 #include "diapycnal.h"
 
-/** Add a term to an optional diagnostic budget array. */
-static void diag_add (pawsim_field2d ** terms, uint term, uint k, uint i, uint j,
-                      real value)
-{
-  if (terms != NULL)
-  {
-    terms[term][k].a[i][j] += value;
-  }
-}
-
 /*
  * Compute reduced gravity at layer interfaces for convective enhancement of
  * diapycnal diffusion/viscosity. Active buoyancy modifies the static gg jump.
@@ -246,18 +236,12 @@ void pawsim_diapycnal_apply_momentum (pawsim_context * ctx)
             real rhs = - (ctx->work.wdia_u[k].a[il][jl]*du_p
                         + ctx->work.wdia_u[k+1].a[il][jl]*du_m);
             ctx->work.dt_u[k].a[il][jl] += rhs / hwest;
-            diag_add(ctx->work.diag_umom,PAWSIM_UMOM_WDIA,k,il,jl,rhs*ctx->cfg.dt);
-            diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_WDIAKE,k,il,jl,
-                     rhs*ctx->work.u_w[k].a[il][jl]*ctx->cfg.dt);
           }
           if (hsouth != 0)
           {
             real rhs = - (ctx->work.wdia_v[k].a[il][jl]*dv_p
                         + ctx->work.wdia_v[k+1].a[il][jl]*dv_m);
             ctx->work.dt_v[k].a[il][jl] += rhs / hsouth;
-            diag_add(ctx->work.diag_vmom,PAWSIM_VMOM_WDIA,k,il,jl,rhs*ctx->cfg.dt);
-            diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_WDIAKE,k,il,jl,
-                     rhs*ctx->work.v_w[k].a[il][jl]*ctx->cfg.dt);
           }
         }
 
@@ -268,18 +252,12 @@ void pawsim_diapycnal_apply_momentum (pawsim_context * ctx)
             real rhs = ctx->work.Fdia_u[k].a[il][jl]
                      - ctx->work.Fdia_u[k+1].a[il][jl];
             ctx->work.dt_u[k].a[il][jl] += rhs / hwest;
-            diag_add(ctx->work.diag_umom,PAWSIM_UMOM_DIAVISC,k,il,jl,rhs*ctx->cfg.dt);
-            diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_DIAVISC,k,il,jl,
-                     rhs*ctx->work.u_w[k].a[il][jl]*ctx->cfg.dt);
           }
           if (hsouth != 0)
           {
             real rhs = ctx->work.Fdia_v[k].a[il][jl]
                      - ctx->work.Fdia_v[k+1].a[il][jl];
             ctx->work.dt_v[k].a[il][jl] += rhs / hsouth;
-            diag_add(ctx->work.diag_vmom,PAWSIM_VMOM_DIAVISC,k,il,jl,rhs*ctx->cfg.dt);
-            diag_add(ctx->work.diag_energy,PAWSIM_ENERGY_DIAVISC,k,il,jl,
-                     rhs*ctx->work.v_w[k].a[il][jl]*ctx->cfg.dt);
           }
         }
       }
